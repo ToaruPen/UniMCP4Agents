@@ -1,0 +1,28 @@
+{
+  "name": "com.dsgarage.unimcp4cc",
+  "version": "1.0.0",
+  "displayName": "UniMCP4CC - Unity MCP Server for Claude Code",
+  "description": "Model Context Protocol server for Unity Editor integration with Claude Code. Enables AI-powered Unity development through natural language commands.",
+  "unity": "6000.0",
+  "type": "tool",
+  "dependencies": {},
+  "keywords": [
+    "mcp",
+    "claude",
+    "claude-code",
+    "ai",
+    "editor",
+    "automation",
+    "anthropic"
+  ],
+  "author": {
+    "name": "dsgarage",
+    "url": "https://github.com/dsgarage"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dsgarage/UniMCP4CC.git"
+  },
+  "license": "MIT",
+  "hideInEditor": false
+}

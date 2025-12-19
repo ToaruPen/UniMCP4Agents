@@ -1,0 +1,11 @@
+# Node.js
+node_modules/
+package-lock.json
+Server~/mcp-bridge/node_modules/
+Server~/mcp-bridge/package-lock.json
+
+# macOS
+.DS_Store
+
+# Unity
+*.pdb
