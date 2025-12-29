@@ -7,5 +7,8 @@ Server~/mcp-bridge/package-lock.json
 # macOS
 .DS_Store
 
+# Codex/Serena
+.serena/
+
 # Unity
 *.pdb
