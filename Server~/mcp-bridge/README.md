@@ -47,8 +47,74 @@ The bridge reads configuration from:
 2. Environment variables:
    - `UNITY_HTTP_URL` - Unity HTTP server URL (default: `http://localhost:5051`)
    - `MCP_VERBOSE` - Set to `true` for verbose logging
+   - `MCP_TOOL_TIMEOUT_MS` - Default tool call timeout in ms (default: `60000`)
+   - `MCP_HEAVY_TOOL_TIMEOUT_MS` - Heavy tool call timeout in ms (default: `300000`)
+   - `MCP_MAX_TOOL_TIMEOUT_MS` - Hard cap for tool call timeout in ms (default: `600000`)
+   - `MCP_REQUIRE_CONFIRMATION` - Require explicit confirmation for potentially destructive tools (default: `true`)
+   - `MCP_REQUIRE_UNAMBIGUOUS_TARGETS` - Block destructive calls that specify targets only by name (default: `true`)
+   - `MCP_SCENE_LIST_MAX_DEPTH` - Max depth for internal `unity.scene.list` preflight (default: `20`, max: `100`)
+   - `MCP_AMBIGUOUS_CANDIDATE_LIMIT` - Candidate list size in ambiguity errors (default: `25`, max: `200`)
+   - `MCP_PREFLIGHT_SCENE_LIST_TIMEOUT_MS` - Timeout for internal scene-list preflight in ms (default: `MCP_TOOL_TIMEOUT_MS`)
+
+### Bridge Tools
+
+These tools are provided by the bridge itself (available even if Unity is not connected):
+
+- `bridge.status` - Shows current URL, connection status, and timeout settings
+- `bridge.reload_config` - Reloads `.unity-mcp-runtime.json` and updates the Unity HTTP URL
+- `bridge.ping` - Calls Unity `/health` and returns the response
+
+### Per-call Timeout Override (Optional)
+
+If you need to override the timeout for a specific tool call, pass one of these keys in the tool arguments:
+
+- `__timeoutMs`
+- `__timeout_ms`
+- `__timeout`
+
+The bridge strips these keys before forwarding the call to Unity.
+
+### Confirmation & Safety Flags
+
+Some tools are treated as potentially destructive (delete/remove/build/import/project-settings changes).
+To run them, pass:
+
+- `__confirm: true`
+- (optional) `__confirmNote: "why this is safe"`
+
+If a destructive tool targets a scene object ambiguously, the bridge blocks it by default and returns a candidate list.
+This includes:
+
+- Name-only targets that match multiple GameObjects
+- Hierarchy paths that are not unique (e.g. duplicated root names)
+
+The bridge uses `unity.scene.list` internally to produce candidates; retry using an exact `path` from the returned list.
+
+To override (not recommended), pass:
+
+- `__allowAmbiguous: true`
+
+### Argument Normalization (Unity-side key aliases)
+
+Some Unity tools accept `gameObjectPath` (or `assetPath`) in addition to `path`.
+The bridge automatically adds aliases so you can call tools with either key:
+
+- `unity.create`: `type` → also sent as `primitiveType` (if missing)
+- `path` → also sent as `gameObjectPath` (if missing)
+- `unity.asset.delete`: `path` → also sent as `assetPath` (if missing)
 
 ## Troubleshooting
+
+### E2E Smoke Test
+
+With Unity Editor open (and the MCP server running), you can run a quick end-to-end smoke test via the bridge:
+
+```bash
+cd Server~/mcp-bridge
+npm run smoke -- --project "/path/to/your/unity/project"
+```
+
+This will create a temporary GameObject, toggle `active` false→true, and then destroy it (confirm-gated).
 
 ### Connection Issues
 

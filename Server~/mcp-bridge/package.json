@@ -11,7 +11,10 @@
     "node": ">=18.0.0"
   },
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "smoke": "node scripts/e2e-smoke.js",
+    "test": "node --test",
+    "test:coverage": "node --test --experimental-test-coverage --test-coverage-include=lib/bridgeLogic.js --test-coverage-lines=100 --test-coverage-functions=100 --test-coverage-branches=100"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^0.6.0"

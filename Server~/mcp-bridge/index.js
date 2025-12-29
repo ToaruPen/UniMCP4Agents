@@ -16,33 +16,149 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import fs from 'fs';
 import path from 'path';
+import {
+  buildTargetResolutionError,
+  clampTimeoutMs,
+  createBridgeConfig,
+  extractGameObjectQuery,
+  findAmbiguousName,
+  findSceneMatches,
+  findTargetIdentifier,
+  getConfirmFlags,
+  getNonDestructiveAmbiguousTargetWarning,
+  getToolTimeoutMs,
+  isConfirmationRequiredToolName,
+  isLikelyGameObjectTargetToolName,
+  isUnambiguousTargetRequiredToolName,
+  normalizeUnityArguments,
+} from './lib/bridgeLogic.js';
 
 /**
  * Loads Unity HTTP port from .unity-mcp-runtime.json
  * Falls back to environment variable or default port
  */
-function getUnityHttpUrl() {
-  // First, try to read runtime config
-  const runtimeConfigPath = path.join(process.cwd(), '.unity-mcp-runtime.json');
+const RUNTIME_CONFIG_FILENAME = '.unity-mcp-runtime.json';
+const DEFAULT_UNITY_HTTP_URL = 'http://localhost:5051';
 
-  if (fs.existsSync(runtimeConfigPath)) {
-    try {
-      const config = JSON.parse(fs.readFileSync(runtimeConfigPath, 'utf8'));
-      const url = `http://localhost:${config.httpPort}`;
-      console.error(`[MCP Bridge] Using runtime config: ${url} (Project: ${config.projectName})`);
-      return url;
-    } catch (error) {
-      console.error(`[MCP Bridge] Failed to read runtime config: ${error.message}`);
-    }
+const BRIDGE_CONFIG = createBridgeConfig(process.env);
+const DEFAULT_TOOL_TIMEOUT_MS = BRIDGE_CONFIG.defaultToolTimeoutMs;
+const HEAVY_TOOL_TIMEOUT_MS = BRIDGE_CONFIG.heavyToolTimeoutMs;
+const MAX_TOOL_TIMEOUT_MS = BRIDGE_CONFIG.maxToolTimeoutMs;
+const REQUIRE_CONFIRMATION = BRIDGE_CONFIG.requireConfirmation;
+const REQUIRE_UNAMBIGUOUS_TARGETS = BRIDGE_CONFIG.requireUnambiguousTargets;
+const SCENE_LIST_MAX_DEPTH = BRIDGE_CONFIG.sceneListMaxDepth;
+const AMBIGUOUS_CANDIDATE_LIMIT = BRIDGE_CONFIG.ambiguousCandidateLimit;
+const PREFLIGHT_SCENE_LIST_TIMEOUT_MS = BRIDGE_CONFIG.preflightSceneListTimeoutMs;
+
+async function fetchSceneList(unityHttpUrl, maxDepth, timeoutMs) {
+  const response = await httpPost(
+    `${unityHttpUrl}/api/mcp`,
+    {
+      jsonrpc: '2.0',
+      method: 'tools/call',
+      params: {
+        name: 'unity.scene.list',
+        arguments: maxDepth ? { maxDepth } : {},
+      },
+      id: 99,
+    },
+    timeoutMs
+  );
+
+  if (response?.error) {
+    const message = response.error?.message || 'Unknown JSON-RPC error';
+    const code = response.error?.code;
+    const details = code ? ` (code: ${code})` : '';
+    throw new Error(`Unity JSON-RPC error${details}: ${message}`);
   }
 
-  // Fallback to environment variable or default
-  const fallbackUrl = process.env.UNITY_HTTP_URL || 'http://localhost:5051';
-  console.error(`[MCP Bridge] Using fallback URL: ${fallbackUrl}`);
-  return fallbackUrl;
+  return response?.result || null;
 }
 
-const UNITY_HTTP_URL = getUnityHttpUrl();
+async function resolveUnambiguousGameObjectTarget(unityHttpUrl, toolName, args) {
+  const queryInfo = extractGameObjectQuery(args);
+  if (!queryInfo) {
+    return {
+      ok: false,
+      response: {
+        content: [
+          {
+            type: 'text',
+            text:
+              `Unambiguous target required for tool: ${toolName}\n` +
+              `No target identifier was provided.\n` +
+              `Provide a GameObject identifier (path/gameObjectPath) and retry, or set __allowAmbiguous: true (not recommended).`,
+          },
+        ],
+        isError: true,
+      },
+    };
+  }
+
+  const query = queryInfo.query;
+  const matchMode = queryInfo.forceNameMatch ? 'name' : 'path';
+  const queryDepth = matchMode === 'path' ? query.split('/').length - 1 : 0;
+  const maxDepth = Math.min(Math.max(SCENE_LIST_MAX_DEPTH, queryDepth), 100);
+
+  const sceneListResult = await fetchSceneList(unityHttpUrl, maxDepth, PREFLIGHT_SCENE_LIST_TIMEOUT_MS);
+  const { matches, suggestions } = findSceneMatches(sceneListResult?.rootObjects, query, matchMode, AMBIGUOUS_CANDIDATE_LIMIT);
+
+  if (matches.length !== 1) {
+    return {
+      ok: false,
+      response: buildTargetResolutionError({
+        toolName,
+        query,
+        matchMode,
+        maxDepth,
+        matches,
+        suggestions,
+        candidateLimit: AMBIGUOUS_CANDIDATE_LIMIT,
+        confirmRequired: isConfirmationRequiredToolName(toolName, BRIDGE_CONFIG),
+      }),
+    };
+  }
+
+  const resolvedPath = typeof matches[0]?.path === 'string' ? matches[0].path : null;
+  if (!resolvedPath) {
+    return {
+      ok: false,
+      response: {
+        content: [{ type: 'text', text: `Failed to resolve a stable path for tool: ${toolName}` }],
+        isError: true,
+      },
+    };
+  }
+
+  const resolvedArgs = { ...args, gameObjectPath: resolvedPath };
+  if (typeof args.path === 'string') {
+    resolvedArgs.path = resolvedPath;
+  }
+  if (typeof args.hierarchyPath === 'string') {
+    resolvedArgs.hierarchyPath = resolvedPath;
+  }
+
+  return { ok: true, args: resolvedArgs, resolvedPath, query };
+}
+
+function tryReadRuntimeConfig(runtimeConfigPath) {
+  if (!fs.existsSync(runtimeConfigPath)) {
+    return { config: null, url: null };
+  }
+
+  try {
+    const raw = fs.readFileSync(runtimeConfigPath, 'utf8');
+    const parsed = JSON.parse(raw);
+    const httpPort = Number(parsed.httpPort);
+    if (!Number.isFinite(httpPort) || httpPort <= 0) {
+      throw new Error(`Invalid httpPort in ${RUNTIME_CONFIG_FILENAME}`);
+    }
+    const url = `http://localhost:${httpPort}`;
+    return { config: parsed, url };
+  } catch (error) {
+    return { config: null, url: null, error };
+  }
+}
 
 // Verbose logging control (set via environment variable)
 const VERBOSE_LOGGING = process.env.MCP_VERBOSE === 'true';
@@ -119,6 +235,12 @@ async function httpGet(url, timeout = 3000) {
 
 class UnityMCPServer {
   constructor() {
+    this.runtimeConfigPath = path.join(process.cwd(), RUNTIME_CONFIG_FILENAME);
+    this.unityHttpUrl = null;
+    this.unityHttpUrlSource = null;
+    this.runtimeConfig = null;
+    this.lastRuntimeConfigError = null;
+
     this.server = new Server(
       {
         name: 'unity-mcp-server',
@@ -136,8 +258,47 @@ class UnityMCPServer {
     this.healthCheckInterval = null;
     this.connectionWarningShown = false;
 
+    this.reloadUnityHttpUrl({ silent: false, reason: 'startup' });
+
     this.setupHandlers();
     this.setupErrorHandling();
+  }
+
+  reloadUnityHttpUrl({ silent = false, reason = 'manual' } = {}) {
+    const previousUrl = this.unityHttpUrl;
+
+    const runtime = tryReadRuntimeConfig(this.runtimeConfigPath);
+    this.lastRuntimeConfigError = runtime.error ? runtime.error.message : null;
+    if (runtime.url) {
+      this.unityHttpUrl = runtime.url;
+      this.unityHttpUrlSource = 'runtime-config';
+      this.runtimeConfig = runtime.config;
+    } else {
+      const fallbackUrl = process.env.UNITY_HTTP_URL || DEFAULT_UNITY_HTTP_URL;
+      this.unityHttpUrl = fallbackUrl;
+      this.unityHttpUrlSource = process.env.UNITY_HTTP_URL ? 'env:UNITY_HTTP_URL' : 'default';
+      this.runtimeConfig = null;
+    }
+
+    const changed = previousUrl !== null && previousUrl !== this.unityHttpUrl;
+    const shouldLog = !silent && (previousUrl === null || changed);
+    if (shouldLog) {
+      if (this.unityHttpUrlSource === 'runtime-config') {
+        const projectName = this.runtimeConfig?.projectName;
+        const projectInfo = projectName ? ` (Project: ${projectName})` : '';
+        log(`[MCP Bridge] Using runtime config: ${this.unityHttpUrl}${projectInfo}`);
+      } else {
+        log(`[MCP Bridge] Using fallback URL: ${this.unityHttpUrl}`);
+      }
+      verboseLog(`[MCP Bridge] URL reload reason: ${reason}`);
+    }
+
+    // If runtime config exists but failed to parse, surface the error for debugging.
+    if (!silent && runtime.error) {
+      log(`[MCP Bridge] Failed to read runtime config: ${runtime.error.message}`);
+    }
+
+    return { url: this.unityHttpUrl, changed, source: this.unityHttpUrlSource };
   }
 
   setupErrorHandling() {
@@ -156,25 +317,66 @@ class UnityMCPServer {
    * Checks if Unity Editor is running and responding
    */
   async checkUnityHealth(silent = false) {
+    const tryHealth = async () => {
+      const data = await httpGet(`${this.unityHttpUrl}/health`, 3000);
+      return data;
+    };
+
     try {
-      const data = await httpGet(`${UNITY_HTTP_URL}/health`, 3000);
+      let data = await tryHealth();
+      if (data?.status !== 'ok') {
+        throw new Error('Unity health check did not return status=ok');
+      }
 
-      if (data.status === 'ok') {
-        const wasDisconnected = !this.isUnityConnected;
-        this.isUnityConnected = true;
-        this.lastHealthCheck = Date.now();
-        this.connectionWarningShown = false;
+      const wasDisconnected = !this.isUnityConnected;
+      this.isUnityConnected = true;
+      this.lastHealthCheck = Date.now();
+      this.connectionWarningShown = false;
 
-        // Always log on state change (initial connection or reconnection)
-        if (wasDisconnected) {
-          log(`[MCP Bridge] Connected to Unity Editor`);
+      // Always log on state change (initial connection or reconnection)
+      if (wasDisconnected) {
+        log(`[MCP Bridge] Connected to Unity Editor`);
+        if (data.projectName) {
           log(`[MCP Bridge]   Project: ${data.projectName}`);
+        }
+        if (data.unityVersion) {
           log(`[MCP Bridge]   Unity Version: ${data.unityVersion}`);
         }
-
-        return true;
+        log(`[MCP Bridge]   URL: ${this.unityHttpUrl}`);
       }
+
+      return true;
     } catch (error) {
+      // On connection failure, reload runtime config so the next attempt can use the updated port.
+      const { changed } = this.reloadUnityHttpUrl({ silent: true, reason: 'health-check-failure' });
+      if (changed) {
+        try {
+          const data = await tryHealth();
+          if (data?.status === 'ok') {
+            const wasDisconnected = !this.isUnityConnected;
+            this.isUnityConnected = true;
+            this.lastHealthCheck = Date.now();
+            this.connectionWarningShown = false;
+
+            if (wasDisconnected) {
+              log(`[MCP Bridge] Connected to Unity Editor`);
+              if (data.projectName) {
+                log(`[MCP Bridge]   Project: ${data.projectName}`);
+              }
+              if (data.unityVersion) {
+                log(`[MCP Bridge]   Unity Version: ${data.unityVersion}`);
+              }
+              log(`[MCP Bridge]   URL: ${this.unityHttpUrl}`);
+            }
+
+            return true;
+          }
+        } catch (retryError) {
+          // Prefer the retry error message if we changed URLs and still failed.
+          error = retryError;
+        }
+      }
+
       const wasConnected = this.isUnityConnected;
       this.isUnityConnected = false;
 
@@ -197,6 +399,94 @@ class UnityMCPServer {
 
       return false;
     }
+  }
+
+  getBridgeTools() {
+    return [
+      {
+        name: 'bridge.status',
+        description: 'Show bridge and Unity connection status',
+        inputSchema: {
+          type: 'object',
+          additionalProperties: false,
+        },
+      },
+      {
+        name: 'bridge.reload_config',
+        description: `Reload ${RUNTIME_CONFIG_FILENAME} and update the Unity HTTP URL`,
+        inputSchema: {
+          type: 'object',
+          additionalProperties: false,
+        },
+      },
+      {
+        name: 'bridge.ping',
+        description: 'Ping Unity /health endpoint and return its response',
+        inputSchema: {
+          type: 'object',
+          additionalProperties: false,
+        },
+      },
+    ];
+  }
+
+  mergeTools(unityTools, bridgeTools) {
+    const seen = new Set((unityTools || []).map((tool) => tool.name));
+    const extras = (bridgeTools || []).filter((tool) => !seen.has(tool.name));
+    return [...(unityTools || []), ...extras];
+  }
+
+  async handleBridgeToolCall(name) {
+    if (name === 'bridge.status') {
+      const status = {
+        unityHttpUrl: this.unityHttpUrl,
+        unityHttpUrlSource: this.unityHttpUrlSource,
+        runtimeConfigPath: this.runtimeConfigPath,
+        runtimeConfigExists: fs.existsSync(this.runtimeConfigPath),
+        lastRuntimeConfigError: this.lastRuntimeConfigError,
+        isUnityConnected: this.isUnityConnected,
+        lastHealthCheck: this.lastHealthCheck ? new Date(this.lastHealthCheck).toISOString() : null,
+        timeouts: {
+          defaultMs: DEFAULT_TOOL_TIMEOUT_MS,
+          heavyMs: HEAVY_TOOL_TIMEOUT_MS,
+          maxMs: MAX_TOOL_TIMEOUT_MS,
+        },
+        safety: {
+          requireConfirmation: REQUIRE_CONFIRMATION,
+          requireUnambiguousTargets: REQUIRE_UNAMBIGUOUS_TARGETS,
+        },
+      };
+
+      return {
+        content: [{ type: 'text', text: JSON.stringify(status, null, 2) }],
+      };
+    }
+
+    if (name === 'bridge.reload_config') {
+      const result = this.reloadUnityHttpUrl({ silent: false, reason: 'bridge.reload_config' });
+      return {
+        content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+      };
+    }
+
+    if (name === 'bridge.ping') {
+      try {
+        const data = await httpGet(`${this.unityHttpUrl}/health`, 3000);
+        return {
+          content: [{ type: 'text', text: JSON.stringify(data, null, 2) }],
+        };
+      } catch (error) {
+        return {
+          content: [{ type: 'text', text: `Error: ${error.message}` }],
+          isError: true,
+        };
+      }
+    }
+
+    return {
+      content: [{ type: 'text', text: `Unknown bridge tool: ${name}` }],
+      isError: true,
+    };
   }
 
   /**
@@ -236,7 +526,7 @@ Please ensure:
 1. Unity Editor is open
 2. Unity MCP Server package is installed in your project
 3. The Unity project is located at: ${process.cwd()}
-4. HTTP server is running on port ${UNITY_HTTP_URL}
+4. HTTP server is running at: ${this.unityHttpUrl}
 
 Check Unity Console for error messages.`,
         },
@@ -247,6 +537,7 @@ Check Unity Console for error messages.`,
 
   setupHandlers() {
     this.server.setRequestHandler(ListToolsRequestSchema, async () => {
+      const bridgeTools = this.getBridgeTools();
       try {
         // Check connection before making request
         if (!this.isUnityConnected) {
@@ -254,9 +545,9 @@ Check Unity Console for error messages.`,
           const isConnected = await this.checkUnityHealth();
           if (!isConnected) {
             verboseLog('[MCP Bridge] Failed to connect to Unity Editor');
-            // Return empty tools list with warning
+            // Return bridge tools with warning
             return {
-              tools: [],
+              tools: bridgeTools,
               _meta: {
                 warning: 'Unity Editor is not connected. Please start Unity Editor and ensure MCP Server is installed.'
               }
@@ -264,23 +555,30 @@ Check Unity Console for error messages.`,
           }
         }
 
-        const response = await httpPost(`${UNITY_HTTP_URL}/api/mcp`, {
+        const response = await httpPost(`${this.unityHttpUrl}/api/mcp`, {
           jsonrpc: '2.0',
           method: 'tools/list',
           params: {},
           id: 1,
         }, 10000);
 
+        if (response?.error) {
+          const message = response.error?.message || 'Unknown JSON-RPC error';
+          throw new Error(`Unity JSON-RPC error: ${message}`);
+        }
+
         const result = response.result || {};
-        return { tools: result.tools || [] };
+        return { tools: this.mergeTools(result.tools || [], bridgeTools) };
       } catch (error) {
         verboseLog('[MCP Bridge] Failed to list tools: ' + error.message);
 
         // Mark as disconnected
         this.isUnityConnected = false;
+        // Reload runtime config so the next attempt can use the updated port.
+        this.reloadUnityHttpUrl({ silent: true, reason: 'tools/list-failure' });
 
         return {
-          tools: [],
+          tools: bridgeTools,
           _meta: {
             error: `Failed to connect to Unity: ${error.message}`
           }
@@ -291,6 +589,11 @@ Check Unity Console for error messages.`,
     this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
       try {
         // Check connection before making request
+        const { name, arguments: rawArgs } = request.params;
+        if (name.startsWith('bridge.')) {
+          return await this.handleBridgeToolCall(name, rawArgs);
+        }
+
         if (!this.isUnityConnected) {
           verboseLog('[MCP Bridge] Unity not connected, attempting to connect...');
           const isConnected = await this.checkUnityHealth();
@@ -300,32 +603,121 @@ Check Unity Console for error messages.`,
           }
         }
 
-        const { name, arguments: args } = request.params;
+        const args = rawArgs || {};
+        const { confirm, confirmNote, allowAmbiguous } = getConfirmFlags(args);
 
-        const response = await httpPost(`${UNITY_HTTP_URL}/api/mcp`, {
+        const overrideTimeoutMs = args.__timeoutMs ?? args.__timeout_ms ?? args.__timeout;
+        const timeoutMs = clampTimeoutMs(
+          overrideTimeoutMs !== undefined ? Number(overrideTimeoutMs) : getToolTimeoutMs(name, BRIDGE_CONFIG),
+          BRIDGE_CONFIG
+        );
+
+        // Normalize known Unity-side argument aliases.
+        let forwardedArgs = normalizeUnityArguments(name, args);
+
+        // Resolve ambiguous targets (preflight) before requiring confirmation, so agents can fetch candidates safely.
+        if (isUnambiguousTargetRequiredToolName(name, BRIDGE_CONFIG) && !allowAmbiguous) {
+          if (isLikelyGameObjectTargetToolName(name)) {
+            const resolution = await resolveUnambiguousGameObjectTarget(this.unityHttpUrl, name, forwardedArgs);
+            if (!resolution.ok) {
+              return resolution.response;
+            }
+            forwardedArgs = resolution.args;
+          } else {
+            const identifier = findTargetIdentifier(forwardedArgs);
+            const ambiguousName = findAmbiguousName(forwardedArgs);
+            if (!identifier && ambiguousName) {
+              return {
+                content: [
+                  {
+                    type: 'text',
+                    text:
+                      `Ambiguous target for tool: ${name}\n` +
+                      `Target specified by ${ambiguousName.key}="${ambiguousName.value}" may match multiple objects.\n` +
+                      `Please resolve to a unique identifier (e.g. path/guid/instanceId) and retry.\n` +
+                      `If you really want to bypass this safety check, set __allowAmbiguous: true (and __confirm: true if required).`,
+                  },
+                ],
+                isError: true,
+              };
+            }
+          }
+        }
+
+        if (isConfirmationRequiredToolName(name, BRIDGE_CONFIG) && !confirm) {
+          const note = confirmNote ? `\nNote: ${String(confirmNote)}` : '';
+          return {
+            content: [
+              {
+                type: 'text',
+                text:
+                  `Confirmation required for potentially destructive tool: ${name}\n` +
+                  `Re-run the same tool call with an explicit confirmation flag:\n` +
+                  `  - __confirm: true\n` +
+                  `  - (optional) __confirmNote: "why this is safe"\n` +
+                  note,
+              },
+            ],
+            isError: true,
+          };
+        }
+
+        // Internal override keys (not forwarded to Unity, to avoid schema validation errors)
+        delete forwardedArgs.__timeoutMs;
+        delete forwardedArgs.__timeout_ms;
+        delete forwardedArgs.__timeout;
+        delete forwardedArgs.__confirm;
+        delete forwardedArgs.__confirmed;
+        delete forwardedArgs.__confirmDangerous;
+        delete forwardedArgs.__confirm_dangerous;
+        delete forwardedArgs.__confirmNote;
+        delete forwardedArgs.__confirm_note;
+        delete forwardedArgs.__allowAmbiguous;
+        delete forwardedArgs.__allow_ambiguous;
+        delete forwardedArgs.__allowAmbiguousTarget;
+        delete forwardedArgs.__allow_ambiguous_target;
+
+        const response = await httpPost(`${this.unityHttpUrl}/api/mcp`, {
           jsonrpc: '2.0',
           method: 'tools/call',
           params: {
             name,
-            arguments: args || {},
+            arguments: forwardedArgs,
           },
           id: 2,
-        }, 30000);
+        }, timeoutMs);
+
+        if (response?.error) {
+          const message = response.error?.message || 'Unknown JSON-RPC error';
+          const code = response.error?.code;
+          const details = code ? ` (code: ${code})` : '';
+          return {
+            content: [{ type: 'text', text: `Unity JSON-RPC error${details}: ${message}` }],
+            isError: true,
+          };
+        }
 
         const result = response.result || {};
+        const warning = getNonDestructiveAmbiguousTargetWarning(name, forwardedArgs, BRIDGE_CONFIG);
 
         return {
-          content: result.content || [
-            {
-              type: 'text',
-              text: JSON.stringify(result, null, 2),
-            },
+          content: [
+            ...(warning ? [warning] : []),
+            ...(result.content || [
+              {
+                type: 'text',
+                text: JSON.stringify(result, null, 2),
+              },
+            ]),
           ],
+          isError: result.isError === true,
         };
       } catch (error) {
         // Mark as disconnected on error
         const wasConnected = this.isUnityConnected;
         this.isUnityConnected = false;
+        // Reload runtime config so the next attempt can use the updated port.
+        this.reloadUnityHttpUrl({ silent: true, reason: 'tools/call-failure' });
 
         const errorMessage = error.message;
 

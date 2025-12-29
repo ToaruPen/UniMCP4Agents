@@ -56,6 +56,9 @@ https://github.com/dsgarage/UniMCP4CC.git
 "Player に Rigidbody コンポーネントを追加して"
 ```
 
+> Note: 安全のため、削除/ビルド/インポート等の破壊的操作は `__confirm: true` を要求します（Bridge側）。
+> さらに、破壊的操作で GameObject ターゲットが曖昧な場合は実行せずに失敗し、候補一覧（パス）を返します（Bridge側）。
+
 ## API カテゴリ
 
 | カテゴリ | 説明 |
@@ -85,6 +88,7 @@ Claude Code → MCP Bridge (Node.js) → Unity MCP Server → Unity Editor
 1. Unity Editor が起動しているか確認
 2. Console に `[MCP] HTTP Server started on port 5051` が表示されているか確認
 3. Claude Code を再起動
+4. Claude Code 側で `bridge.status` を実行し、接続状態と使用URLを確認
 
 ### Unity バージョンの互換性
 
