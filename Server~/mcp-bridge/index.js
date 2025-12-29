@@ -2,7 +2,7 @@
 /**
  * Unity MCP Bridge Server
  *
- * This server bridges Claude Code and Unity Editor via MCP protocol.
+ * This server bridges MCP clients (stdio) and Unity Editor via MCP protocol.
  * No external dependencies required (uses Node.js built-in fetch API).
  *
  * Requirements: Node.js 18+ (for native fetch support)

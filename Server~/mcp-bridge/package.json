@@ -2,7 +2,7 @@
   "name": "unity-mcp-bridge",
   "private": true,
   "version": "1.0.0",
-  "description": "MCP Bridge for Unity Editor - connects Claude Code to Unity",
+  "description": "MCP bridge for Unity Editor - connects MCP clients (stdio) to Unity",
   "type": "module",
   "main": "index.js",
   "bin": {
@@ -23,8 +23,9 @@
   "keywords": [
     "mcp",
     "unity",
-    "claude",
-    "ai"
+    "bridge",
+    "ai",
+    "editor"
   ],
   "license": "MIT"
 }

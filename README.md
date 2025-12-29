@@ -1,8 +1,9 @@
-# UniMCP4CC - Unity MCP Server for Claude Code
+# UniMCP4CC - Unity MCP Server (MCP)
 
-Unity Editor を Claude Code から操作するための MCP (Model Context Protocol) サーバーです。
+Unity Editor を MCP (Model Context Protocol) 対応クライアントから操作するためのサーバーです。
 
-> **Note**: このパッケージは **Claude Code 専用** に設計・テストされています。
+> **Note**: 本家 UniMCP4CC（Claude Code 向け）をベースにしていますが、README は **MCP クライアント一般**で使う前提で記載しています。
+> Claude Code 向けのセットアップ UI も同梱しています（後述）。他クライアントでも Bridge を手動設定すれば利用できます。
 
 ## できること（概要）
 
@@ -22,13 +23,13 @@ Unity Editor を “状態取得 → 判断 → 変更 → 検証” のルー�
 |-----|-----------|
 | **Unity** | 6000.0.0 以降 (Unity 6) |
 | **Node.js** | 18 以降 |
-| **AI Client** | Claude Code (Anthropic) |
+| **MCP Client** | MCP tools（stdio）対応のクライアント |
 
 > **Important**: このパッケージは Unity 6 (6000.x) 向けにビルドされています。Unity 2021/2022 では動作しない可能性があります。
 
 ## 機能
 
-Claude Code から Unity Editor を直接操作できます：
+MCP クライアントから Unity Editor を直接操作できます：
 
 - **シーン操作**: GameObject の作成・削除・検索
 - **コンポーネント操作**: コンポーネントの追加・削除・プロパティ変更
@@ -44,22 +45,35 @@ Claude Code から Unity Editor を直接操作できます：
 Unity Editor で `Window > Package Manager` を開き、`+` > `Add package from git URL...` を選択:
 
 ```
-https://github.com/dsgarage/UniMCP4CC.git
+https://github.com/ToaruPen/UniMCP4CC.git
 ```
 
-### Claude Code の設定
+### MCP クライアントの設定
+
+このパッケージは Unity 側で HTTP サーバーを起動し、`Server~/mcp-bridge` が MCP（stdio）⇔ Unity HTTP をブリッジします。
+
+#### Claude Code（自動）
 
 パッケージインストール後、Unity Editor で:
 
 `Window > Unity MCP > Setup Claude Code`
 
-表示されるウィンドウで「Setup Claude Code」ボタンをクリックすると、自動的に設定が行われます。
+表示されるウィンドウで設定生成ボタンをクリックすると、自動的に設定が行われます。
+
+#### その他の MCP クライアント（手動）
+
+お使いの MCP クライアントで、`Server~/mcp-bridge/index.js` を **stdio サーバーとして起動**するよう設定してください。
+
+- `cwd` は Unity プロジェクトルート（`.unity-mcp-runtime.json` がある場所）に設定
+- もしくは `UNITY_HTTP_URL=http://localhost:5051` を環境変数で指定
+
+詳細は `Server~/mcp-bridge/README.md` を参照してください。
 
 ## 使用方法
 
 1. Unity Editor を起動（MCP Server が自動起動します）
-2. Claude Code を起動
-3. Unity プロジェクトについて Claude Code に質問・指示
+2. MCP クライアントを起動
+3. Unity プロジェクトについて指示（ツール呼び出し）
 
 ### 使用例
 
@@ -74,7 +88,7 @@ https://github.com/dsgarage/UniMCP4CC.git
 
 ## 安全機構（Bridge）
 
-`Server~/mcp-bridge` は MCP クライアント（Claude Code）と Unity HTTP サーバーの間に入り、誤操作を減らすためのガードを提供します。
+`Server~/mcp-bridge` は MCP クライアントと Unity HTTP サーバーの間に入り、誤操作を減らすためのガードを提供します。
 
 - **確認フラグ**: 破壊的操作は `__confirm: true` が必須（任意で `__confirmNote`）
 - **曖昧ターゲットの拒否**: 破壊的操作で target が曖昧な場合、`unity.scene.list` を使って候補一覧（パス）を返して停止
@@ -112,13 +126,13 @@ https://github.com/dsgarage/UniMCP4CC.git
 | editor | エディタ操作 |
 | log | ログ操作 |
 
-詳細な API リファレンスは [Wiki](https://github.com/dsgarage/UniMCP4CC/wiki) を参照してください。
+詳細な API リファレンスは [Wiki](https://github.com/ToaruPen/UniMCP4CC/wiki) を参照してください。
 Bridge（Node）の詳細は `Server~/mcp-bridge/README.md` を参照してください。
 
 ## アーキテクチャ
 
 ```
-Claude Code → MCP Bridge (Node.js) → Unity MCP Server → Unity Editor
+MCP Client → MCP Bridge (Node.js/stdio) → Unity MCP Server (HTTP) → Unity Editor
 ```
 
 ## テスト（Bridge）
@@ -137,8 +151,8 @@ npm run smoke -- --project "/path/to/your/unity/project"
 
 1. Unity Editor が起動しているか確認
 2. Console に `[MCP] HTTP Server started on port 5051` が表示されているか確認
-3. Claude Code を再起動
-4. Claude Code 側で `bridge.status` を実行し、接続状態と使用URLを確認
+3. MCP クライアントを再起動
+4. `bridge.status` を実行し、接続状態と使用URLを確認
 
 ### Unity バージョンの互換性
 
@@ -151,10 +165,5 @@ MIT License
 
 ## 関連リンク
 
-- [Claude Code](https://claude.ai/download)
 - [Model Context Protocol](https://modelcontextprotocol.io/)
-- [API Reference (Wiki)](https://github.com/dsgarage/UniMCP4CC/wiki)
-
----
-
-Made with Claude Code by dsgarage
+- [API Reference (Wiki)](https://github.com/ToaruPen/UniMCP4CC/wiki)

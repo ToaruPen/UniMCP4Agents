@@ -1,6 +1,6 @@
 # Unity MCP Bridge
 
-MCP Bridge server that connects Claude Code to Unity Editor.
+MCP Bridge server that connects MCP clients (stdio) to Unity Editor.
 
 ## Requirements
 
@@ -9,14 +9,14 @@ MCP Bridge server that connects Claude Code to Unity Editor.
 
 ## Quick Setup
 
-### Option 1: Automatic Setup (Recommended)
+### Option 1: Automatic Setup (Claude Code)
 
 1. Open Unity Editor with the MCP Server package installed
 2. Go to **Window > Unity MCP > Setup Claude Code**
-3. Click **Generate Configuration**
+3. Click the button to generate the configuration
 4. Restart Claude Code
 
-### Option 2: Manual Setup
+### Option 2: Manual Setup (Any MCP Client)
 
 1. Install dependencies:
    ```bash
@@ -24,7 +24,9 @@ MCP Bridge server that connects Claude Code to Unity Editor.
    npm install
    ```
 
-2. Add to your Claude Code configuration (`~/.claude/settings.json` or `.mcp.json`):
+2. Configure your MCP client to launch this bridge as a stdio MCP server.
+
+Example (Claude Code / `.mcp.json`-style):
    ```json
    {
      "mcpServers": {
@@ -37,7 +39,7 @@ MCP Bridge server that connects Claude Code to Unity Editor.
    }
    ```
 
-3. Start Unity Editor and Claude Code
+3. Start Unity Editor and your MCP client
 
 ## Configuration Files
 
