@@ -6,6 +6,7 @@ import {
   clampTimeoutMs,
   createBridgeConfig,
   extractGameObjectQuery,
+  filterAssetCandidates,
   findAmbiguousName,
   findSceneMatches,
   findTargetIdentifier,
@@ -16,10 +17,13 @@ import {
   isLikelyGameObjectTargetToolName,
   isReadOnlyToolName,
   isUnambiguousTargetRequiredToolName,
+  normalizeSearchInFolders,
   normalizeUnityArguments,
   parseBoolean,
   parsePositiveInt,
+  parseUnityAssetFilter,
   summarizeSceneCandidate,
+  truncateUnityLogHistoryPayload,
 } from '../lib/bridgeLogic.js';
 
 test('parsePositiveInt', () => {
@@ -49,6 +53,7 @@ test('createBridgeConfig', () => {
   assert.equal(defaults.maxToolTimeoutMs, 600_000);
   assert.equal(defaults.requireConfirmation, true);
   assert.equal(defaults.requireUnambiguousTargets, true);
+  assert.equal(defaults.enableUnsafeEditorInvoke, false);
   assert.equal(defaults.sceneListMaxDepth, 20);
   assert.equal(defaults.ambiguousCandidateLimit, 25);
   assert.equal(defaults.preflightSceneListTimeoutMs, 60_000);
@@ -63,6 +68,7 @@ test('createBridgeConfig', () => {
     MCP_MAX_TOOL_TIMEOUT_MS: '4000',
     MCP_REQUIRE_CONFIRMATION: '0',
     MCP_REQUIRE_UNAMBIGUOUS_TARGETS: 'false',
+    MCP_ENABLE_UNSAFE_EDITOR_INVOKE: '1',
     MCP_SCENE_LIST_MAX_DEPTH: '999',
     MCP_AMBIGUOUS_CANDIDATE_LIMIT: '999',
     MCP_PREFLIGHT_SCENE_LIST_TIMEOUT_MS: '9999',
@@ -72,6 +78,7 @@ test('createBridgeConfig', () => {
   assert.equal(custom.maxToolTimeoutMs, 4000);
   assert.equal(custom.requireConfirmation, false);
   assert.equal(custom.requireUnambiguousTargets, false);
+  assert.equal(custom.enableUnsafeEditorInvoke, true);
   assert.equal(custom.sceneListMaxDepth, 100);
   assert.equal(custom.ambiguousCandidateLimit, 200);
   assert.equal(custom.preflightSceneListTimeoutMs, 4000);
@@ -82,13 +89,16 @@ test('isConfirmationRequiredToolName', () => {
   assert.equal(isConfirmationRequiredToolName('unity.asset.delete', undefined), false);
   assert.equal(isConfirmationRequiredToolName('bridge.status', config), false);
   assert.equal(isConfirmationRequiredToolName('unity.scene.list', config), false);
+  assert.equal(isConfirmationRequiredToolName('unity.editor.invokeStaticMethod', config), true);
   assert.equal(isConfirmationRequiredToolName('unity.asset.delete', config), true);
+  assert.equal(isConfirmationRequiredToolName('unity.assetImport.setTextureType', config), true);
   assert.equal(isConfirmationRequiredToolName('unity.editor.setPlayerSettings', config), true);
   assert.equal(isConfirmationRequiredToolName('unity.gameObject.setActive', config), false);
   assert.equal(isConfirmationRequiredToolName('unity.', config), false);
 
   const disabled = { ...config, requireConfirmation: false };
   assert.equal(isConfirmationRequiredToolName('unity.asset.delete', disabled), false);
+  assert.equal(isConfirmationRequiredToolName('unity.editor.invokeStaticMethod', disabled), true);
 });
 
 test('getConfirmFlags', () => {
@@ -176,6 +186,124 @@ test('findAmbiguousName', () => {
 
 test('normalizeUnityArguments', () => {
   assert.deepEqual(normalizeUnityArguments('unity.any', null), {});
+
+  assert.deepEqual(
+    normalizeUnityArguments('unity.component.setReference', { referenceType: '  gameObject  ' }),
+    { referenceType: 'gameObject' }
+  );
+  assert.deepEqual(
+    normalizeUnityArguments('unity.component.setReference', {}),
+    { referenceType: 'gameObject' }
+  );
+  assert.deepEqual(
+    normalizeUnityArguments('unity.component.setReference', { fieldName: 'target', referencePath: 'SR_Target' }),
+    { fieldName: 'target', referencePath: 'SR_Target', referenceType: 'gameObject', referenceGameObjectPath: 'SR_Target' }
+  );
+  assert.deepEqual(
+    normalizeUnityArguments('unity.component.setReference', { referenceType: 'gameObject', referencePath: 'SR_Target' }),
+    { referenceType: 'gameObject', referencePath: 'SR_Target', referenceGameObjectPath: 'SR_Target' }
+  );
+  assert.deepEqual(
+    normalizeUnityArguments('unity.component.setReference', { fieldName: 'targetTransform', referencePath: 'SR_Target' }),
+    { fieldName: 'targetTransform', referencePath: 'SR_Target', referenceType: 'component', referenceGameObjectPath: 'SR_Target' }
+  );
+  assert.deepEqual(
+    normalizeUnityArguments('unity.component.setReference', { referenceType: 'component', referencePath: 'SR_Target' }),
+    { referenceType: 'component', referencePath: 'SR_Target', referenceGameObjectPath: 'SR_Target' }
+  );
+  assert.deepEqual(
+    normalizeUnityArguments('unity.component.setReference', { referenceType: 'unknown', referencePath: 'SR_Target' }),
+    { referenceType: 'unknown', referencePath: 'SR_Target' }
+  );
+  assert.deepEqual(
+    normalizeUnityArguments('unity.component.setReference', { fieldName: 'sprite', referencePath: 'Assets/foo.png' }),
+    { fieldName: 'sprite', referencePath: 'Assets/foo.png', referenceType: 'asset', referenceAssetPath: 'Assets/foo.png' }
+  );
+  assert.deepEqual(
+    normalizeUnityArguments('unity.component.setReference', { fieldName: 'sprite', referencePath: 'Packages/foo.png' }),
+    { fieldName: 'sprite', referencePath: 'Packages/foo.png', referenceType: 'asset', referenceAssetPath: 'Packages/foo.png' }
+  );
+  assert.deepEqual(
+    normalizeUnityArguments('unity.component.setReference', { referenceType: 'asset', referencePath: 'Assets/foo.asset' }),
+    { referenceType: 'asset', referencePath: 'Assets/foo.asset', referenceAssetPath: 'Assets/foo.asset' }
+  );
+  assert.deepEqual(
+    normalizeUnityArguments('unity.component.setReference', {
+      referenceType: 'asset',
+      referencePath: 'Assets/foo.asset',
+      referenceAssetPath: 'Assets/other.asset',
+    }),
+    { referenceType: 'asset', referencePath: 'Assets/foo.asset', referenceAssetPath: 'Assets/other.asset' }
+  );
+  assert.deepEqual(
+    normalizeUnityArguments('unity.component.setReference', {
+      referenceType: 'asset',
+      referencePath: 'Assets/foo.asset',
+      referenceAssetPath: '   ',
+    }),
+    { referenceType: 'asset', referencePath: 'Assets/foo.asset', referenceAssetPath: 'Assets/foo.asset' }
+  );
+  assert.deepEqual(
+    normalizeUnityArguments('unity.component.setReference', {
+      referenceType: 'gameObject',
+      referencePath: 'SR_Target',
+      referenceGameObjectPath: 'Already',
+    }),
+    { referenceType: 'gameObject', referencePath: 'SR_Target', referenceGameObjectPath: 'Already' }
+  );
+  assert.deepEqual(
+    normalizeUnityArguments('unity.component.setReference', {
+      referenceType: 'component',
+      referencePath: 'SR_Target',
+      referenceGameObjectPath: 'Already',
+    }),
+    { referenceType: 'component', referencePath: 'SR_Target', referenceGameObjectPath: 'Already' }
+  );
+  assert.deepEqual(
+    normalizeUnityArguments('unity.component.setReference', {
+      referenceType: 'gameObject',
+      referencePath: 'SR_Target',
+      referenceGameObjectPath: '   ',
+    }),
+    { referenceType: 'gameObject', referencePath: 'SR_Target', referenceGameObjectPath: 'SR_Target' }
+  );
+  assert.deepEqual(
+    normalizeUnityArguments('unity.component.setReference', { reference_type: 'component', fieldName: 'target' }),
+    { fieldName: 'target', referenceType: 'component' }
+  );
+  assert.deepEqual(
+    normalizeUnityArguments('unity.component.setReference', { fieldName: 'targetTransform' }),
+    { fieldName: 'targetTransform', referenceType: 'component' }
+  );
+  assert.deepEqual(
+    normalizeUnityArguments('unity.component.setReference', { fieldName: 'targetTransform', referenceType: '   ' }),
+    { fieldName: 'targetTransform', referenceType: 'component' }
+  );
+  assert.deepEqual(
+    normalizeUnityArguments('unity.component.setReference', { fieldName: 'target', referenceType: 123 }),
+    { fieldName: 'target', referenceType: 'gameObject' }
+  );
+
+  assert.deepEqual(
+    normalizeUnityArguments('unity.prefab.revert', { instancePath: 'Root/PrefabInstance' }),
+    { instancePath: 'Root/PrefabInstance', gameObjectPath: 'Root/PrefabInstance' }
+  );
+  assert.deepEqual(
+    normalizeUnityArguments('unity.prefab.apply', { instancePath: 'Root/PrefabInstance', gameObjectPath: 'Already' }),
+    { instancePath: 'Root/PrefabInstance', gameObjectPath: 'Already' }
+  );
+  assert.deepEqual(
+    normalizeUnityArguments('unity.prefab.unpack', { instancePath: 'Root/PrefabInstance', gameObjectPath: '   ' }),
+    { instancePath: 'Root/PrefabInstance', gameObjectPath: 'Root/PrefabInstance' }
+  );
+  assert.deepEqual(
+    normalizeUnityArguments('unity.prefab.revert', { instancePath: '   ' }),
+    { instancePath: '   ' }
+  );
+  assert.deepEqual(
+    normalizeUnityArguments('unity.prefab.apply', {}),
+    {}
+  );
 
   assert.deepEqual(
     normalizeUnityArguments('unity.uitoolkit.runtime.getHierarchy', { gameObjectPath: 'Root/UI' }),
@@ -538,4 +666,157 @@ test('getToolTimeoutMs and clampTimeoutMs', () => {
   assert.equal(clampTimeoutMs(-1, config), 1000);
   assert.equal(clampTimeoutMs(2000, config), 2000);
   assert.equal(clampTimeoutMs(9999, config), 4000);
+});
+
+test('truncateUnityLogHistoryPayload', () => {
+  assert.equal(truncateUnityLogHistoryPayload(null, { maxMessageChars: 10 }), null);
+  assert.deepEqual(truncateUnityLogHistoryPayload('nope', { maxMessageChars: 10 }), 'nope');
+
+  const noLogs = { total: 1 };
+  assert.equal(truncateUnityLogHistoryPayload(noLogs, { maxMessageChars: 10 }), noLogs);
+
+  const payload = {
+    logs: [
+      null,
+      { message: 123, stackTrace: true },
+      { message: 'hello', stackTrace: 'stack' },
+      { message: '1234567890', stackTrace: 'abcdef' },
+    ],
+    total: 4,
+  };
+
+  // No limits -> no change
+  assert.equal(truncateUnityLogHistoryPayload(payload, {}), payload);
+  assert.equal(truncateUnityLogHistoryPayload(payload, { maxMessageChars: 0 }), payload);
+
+  // Truncate message only (limit == 1)
+  const truncatedMessage = truncateUnityLogHistoryPayload(payload, { maxMessageChars: 1 });
+  assert.notEqual(truncatedMessage, payload);
+  assert.equal(truncatedMessage.logs[2].message, '…');
+  assert.equal(truncatedMessage.logs[2].stackTrace, 'stack');
+
+  // Truncate stackTrace only
+  const truncatedStack = truncateUnityLogHistoryPayload(payload, { maxStackTraceChars: 3 });
+  assert.equal(truncatedStack.logs[2].stackTrace, 'st…');
+
+  // Limits that don't truncate -> returns original object
+  const untouched = truncateUnityLogHistoryPayload(payload, { maxMessageChars: 20, maxStackTraceChars: 20 });
+  assert.equal(untouched, payload);
+});
+
+test('parseUnityAssetFilter', () => {
+  assert.deepEqual(parseUnityAssetFilter(null), {
+    raw: '',
+    assetType: null,
+    name: null,
+    guid: null,
+    path: null,
+    tokens: [],
+  });
+
+  assert.deepEqual(parseUnityAssetFilter('t:'), {
+    raw: 't:',
+    assetType: null,
+    name: null,
+    guid: null,
+    path: null,
+    tokens: [],
+  });
+
+  assert.deepEqual(parseUnityAssetFilter("  t:Scene   name:'My Mat'  "), {
+    raw: "  t:Scene   name:'My Mat'  ",
+    assetType: 'Scene',
+    name: 'My Mat',
+    guid: null,
+    path: null,
+    tokens: [],
+  });
+
+  assert.deepEqual(parseUnityAssetFilter('t:Material name:MyMat Foo'), {
+    raw: 't:Material name:MyMat Foo',
+    assetType: 'Material',
+    name: 'MyMat',
+    guid: null,
+    path: null,
+    tokens: ['Foo'],
+  });
+
+  assert.deepEqual(parseUnityAssetFilter('guid:abc123 path:Assets/foo.prefab label:Ignored'), {
+    raw: 'guid:abc123 path:Assets/foo.prefab label:Ignored',
+    assetType: null,
+    name: null,
+    guid: 'abc123',
+    path: 'Assets/foo.prefab',
+    tokens: ['label:Ignored'],
+  });
+
+  assert.deepEqual(parseUnityAssetFilter('t:Scene t:Material name:Foo name:Bar'), {
+    raw: 't:Scene t:Material name:Foo name:Bar',
+    assetType: 'Scene',
+    name: 'Foo',
+    guid: null,
+    path: null,
+    tokens: ['t:Material', 'name:Bar'],
+  });
+
+  assert.deepEqual(parseUnityAssetFilter('guid:abc guid:def path:Assets/a path:Assets/b'), {
+    raw: 'guid:abc guid:def path:Assets/a path:Assets/b',
+    assetType: null,
+    name: null,
+    guid: 'abc',
+    path: 'Assets/a',
+    tokens: ['guid:def', 'path:Assets/b'],
+  });
+
+  assert.deepEqual(parseUnityAssetFilter('name:\"My Mat\" t:Scene'), {
+    raw: 'name:"My Mat" t:Scene',
+    assetType: 'Scene',
+    name: 'My Mat',
+    guid: null,
+    path: null,
+    tokens: [],
+  });
+
+  assert.deepEqual(parseUnityAssetFilter('t: Material name: MyMat'), {
+    raw: 't: Material name: MyMat',
+    assetType: 'Material',
+    name: 'MyMat',
+    guid: null,
+    path: null,
+    tokens: [],
+  });
+});
+
+test('normalizeSearchInFolders', () => {
+  assert.deepEqual(normalizeSearchInFolders(null), []);
+  assert.deepEqual(normalizeSearchInFolders([]), []);
+  assert.deepEqual(normalizeSearchInFolders(['Assets', '  ', 123, 'Packages']), ['Assets', 'Packages']);
+  assert.deepEqual(normalizeSearchInFolders('  Assets/Scenes  '), ['Assets/Scenes']);
+  assert.deepEqual(normalizeSearchInFolders('   '), []);
+});
+
+test('filterAssetCandidates', () => {
+  const assets = [
+    null,
+    { name: 'SampleScene', path: 'Assets/Scenes/SampleScene.unity', guid: 'a', type: 'SceneAsset' },
+    { name: 'Other', path: 'Assets/Other.asset', guid: 'b', type: 'Object' },
+    { name: 123, path: null, guid: 'c', type: 'Object' },
+  ];
+
+  const parsed = parseUnityAssetFilter('t:Scene name:Sample Scenes');
+  assert.deepEqual(filterAssetCandidates(assets, parsed).map((asset) => asset.guid), ['a']);
+
+  const byToken = parseUnityAssetFilter('t:Object Scenes');
+  assert.deepEqual(filterAssetCandidates(assets, byToken).map((asset) => asset.guid), ['a']);
+
+  const byNameCaseInsensitive = parseUnityAssetFilter('name:samplescene');
+  assert.deepEqual(filterAssetCandidates(assets, byNameCaseInsensitive).map((asset) => asset.guid), ['a']);
+
+  const noNameMatch = parseUnityAssetFilter('name:DoesNotExist');
+  assert.deepEqual(filterAssetCandidates(assets, noNameMatch), []);
+
+  const noTokenMatch = parseUnityAssetFilter('t:Object Nope');
+  assert.deepEqual(filterAssetCandidates(assets, noTokenMatch), []);
+
+  assert.deepEqual(filterAssetCandidates(null, { name: 'x', tokens: null }), []);
 });

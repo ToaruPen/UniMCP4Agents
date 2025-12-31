@@ -9,6 +9,7 @@
 2. Unity プロジェクトを起動（Unity 側 HTTP サーバーが自動起動）
 3. MCP クライアントから `Server~/mcp-bridge/index.js` を stdio サーバーとして起動
 4. `bridge.status` / `bridge.ping` で接続確認
+5. 作業中は `unity.log.history` で Unity Console の Error/Warning を確認（推奨）
 
 ## 目次
 
@@ -17,4 +18,3 @@
 - [Tools Overview](Tools.md)
 - [UI Toolkit Extension](UI-Toolkit.md)
 - [Troubleshooting](Troubleshooting.md)
-

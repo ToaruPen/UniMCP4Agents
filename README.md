@@ -93,6 +93,8 @@ https://github.com/ToaruPen/UniMCP4CC.git
 - **確認フラグ**: 破壊的操作は `__confirm: true` が必須（任意で `__confirmNote`）
 - **曖昧ターゲットの拒否**: 破壊的操作で target が曖昧な場合、`unity.scene.list` を使って候補一覧（パス）を返して停止
 - **タイムアウト制御**: `__timeoutMs`（または `__timeout_ms` / `__timeout`）で 1 回の呼び出しだけ延長可能
+- **危険ツールの無効化（既定）**: `unity.editor.invokeStaticMethod` は既定で無効（有効化: `MCP_ENABLE_UNSAFE_EDITOR_INVOKE=true`、有効化しても常に `__confirm: true` が必要）
+- **ログ切り詰め（任意）**: `unity.log.history` は `__maxMessageChars` / `__maxStackTraceChars` 指定時のみ切り詰め（既定は無加工）
 - **Bridge 付属ツール**: `bridge.status` / `bridge.ping` / `bridge.reload_config`
 
 ## UI Toolkit について
@@ -111,6 +113,32 @@ https://github.com/ToaruPen/UniMCP4CC.git
 3. **Samples** の `UIToolkit Extension` を **Import** する
 
 > `com.unity.ui.test-framework`（UI Test Framework）は上記拡張の代替ではありません。
+
+## Cinemachine / Timeline について（現状の制限）
+
+`unity.cinemachine.*` / `unity.timeline.*` ツール群は `tools/list` に表示されますが、**このリポジトリに含まれる Unity 側サーバー構成では利用できません**。
+
+- **症状**: パッケージ導入済みでも `This API requires the 'com.unity.cinemachine (Cinemachine)' ...` / `... com.unity.timeline (Timeline) ...` のように「未導入扱い」で失敗します
+- **原因**: これらの API は Unity 側で追加の Editor 拡張アセンブリ（`LocalMcp.UnityServer.Cinemachine.Editor` / `LocalMcp.UnityServer.Timeline.Editor`）へ委譲する設計ですが、本パッケージには該当拡張が同梱されていないためロードに失敗します（エラーメッセージが紛らわしい点に注意）
+
+### 代替案（汎用ツールでの運用）
+
+#### Cinemachine（代替しやすい）
+
+- 生成: `unity.editor.executeMenuItem("GameObject/Cinemachine/...")` で Cinemachine のメニューから GameObject を作成
+- 設定: `unity.component.inspect` でフィールド/プロパティ名を確認し、`unity.component.setField` / `unity.component.setProperty` / `unity.component.setReference` で変更
+
+#### Timeline（代替は部分的）
+
+- `PlayableDirector` の追加・基本設定は `unity.component.*` で可能です（再生/停止は `unity.component.invoke` を使用）
+- `TimelineAsset` は `unity.asset.createScriptableObject` で作成できます（`typeName: "UnityEngine.Timeline.TimelineAsset"`）
+- ただし **トラック/クリップ/マーカー/バインディングの構築を “ツールだけで” 行うのは難度が高い**ため、現状は Unity Editor 上での手作業か、専用 Editor 拡張（または自作ヘルパー）を推奨します
+
+### 注意事項（汎用ツール利用時）
+
+- `unity.component.setField` / `unity.component.setSerializedProperty` は主に数値/文字列/enum/Vector/Quaternion 等向けです。参照（UnityEngine.Object）は `unity.component.setReference` を使ってください
+- `unity.component.setProperty` は public property のみ対象です（Inspector 上の多くは SerializedField のため `setField`/`setSerializedProperty` が必要になります）
+- 変更直後は `unity.log.history({ level: "Error,Warning" })` で Unity Console を確認する運用を推奨します（プロジェクト側スクリプト由来の例外が混ざりやすいため）
 
 ## API カテゴリ
 

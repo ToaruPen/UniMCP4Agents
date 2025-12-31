@@ -30,6 +30,7 @@ export function createBridgeConfig(env) {
 
   const requireConfirmation = parseBoolean(env?.MCP_REQUIRE_CONFIRMATION, true);
   const requireUnambiguousTargets = parseBoolean(env?.MCP_REQUIRE_UNAMBIGUOUS_TARGETS, true);
+  const enableUnsafeEditorInvoke = parseBoolean(env?.MCP_ENABLE_UNSAFE_EDITOR_INVOKE, false);
   const sceneListMaxDepth = Math.min(parsePositiveInt(env?.MCP_SCENE_LIST_MAX_DEPTH, 20), 100);
   const ambiguousCandidateLimit = Math.min(parsePositiveInt(env?.MCP_AMBIGUOUS_CANDIDATE_LIMIT, 25), 200);
   const preflightSceneListTimeoutMs = Math.min(
@@ -43,6 +44,7 @@ export function createBridgeConfig(env) {
     maxToolTimeoutMs,
     requireConfirmation,
     requireUnambiguousTargets,
+    enableUnsafeEditorInvoke,
     sceneListMaxDepth,
     ambiguousCandidateLimit,
     preflightSceneListTimeoutMs,
@@ -50,12 +52,19 @@ export function createBridgeConfig(env) {
 }
 
 export function isConfirmationRequiredToolName(toolName, config) {
+  if (toolName === 'unity.editor.invokeStaticMethod') {
+    return true;
+  }
   if (!config?.requireConfirmation) {
     return false;
   }
   // Bridge tools are always allowed.
   if (toolName.startsWith('bridge.')) {
     return false;
+  }
+  // Bridge override that changes importer settings (+ optional reimport).
+  if (toolName === 'unity.assetImport.setTextureType') {
+    return true;
   }
 
   const action = toolName.split(/[.:/]/).pop() || toolName;
@@ -207,6 +216,71 @@ export function normalizeUnityArguments(toolName, args) {
   }
 
   const normalized = { ...args };
+
+  if (toolName === 'unity.component.setReference') {
+    const referenceTypeString = typeof normalized.referenceType === 'string' ? normalized.referenceType.trim() : '';
+    if (typeof normalized.referenceType === 'string') {
+      normalized.referenceType = referenceTypeString;
+    }
+
+    const alias = typeof normalized.reference_type === 'string' ? normalized.reference_type.trim() : '';
+    if (referenceTypeString.length === 0 && alias.length > 0) {
+      normalized.referenceType = alias;
+      delete normalized.reference_type;
+    }
+
+    const hasReferenceType = typeof normalized.referenceType === 'string' && normalized.referenceType.trim().length > 0;
+    const referencePathCandidate = typeof normalized.referencePath === 'string' ? normalized.referencePath.trim() : '';
+    if (!hasReferenceType) {
+      if (/^(Assets|Packages)\//.test(referencePathCandidate)) {
+        normalized.referenceType = 'asset';
+      } else {
+        const fieldName = typeof normalized.fieldName === 'string' ? normalized.fieldName.trim().toLowerCase() : '';
+        const preferComponent = /(transform|component|renderer|collider|rigidbody|camera|light|animator|audio)/.test(
+          fieldName
+        );
+
+        normalized.referenceType = preferComponent ? 'component' : 'gameObject';
+      }
+    }
+
+    const referenceType = normalized.referenceType;
+    const referencePath = referencePathCandidate;
+    const referenceGameObjectPath =
+      typeof normalized.referenceGameObjectPath === 'string' ? normalized.referenceGameObjectPath.trim() : '';
+    const referenceAssetPath =
+      typeof normalized.referenceAssetPath === 'string' ? normalized.referenceAssetPath.trim() : '';
+
+    // Unity-side validation expects specialized keys for non-asset references.
+    // Map the schema-exposed `referencePath` into the expected keys.
+    if (referencePath.length > 0) {
+      switch (referenceType) {
+        case 'gameObject':
+        case 'component':
+          if (referenceGameObjectPath.length === 0) {
+            normalized.referenceGameObjectPath = referencePath;
+          }
+          break;
+        case 'asset':
+          if (referenceAssetPath.length === 0) {
+            normalized.referenceAssetPath = referencePath;
+          }
+          break;
+        default:
+          break;
+      }
+    }
+  }
+
+  if (toolName === 'unity.prefab.apply' || toolName === 'unity.prefab.revert' || toolName === 'unity.prefab.unpack') {
+    const instancePath = typeof normalized.instancePath === 'string' ? normalized.instancePath.trim() : '';
+    const gameObjectPath = typeof normalized.gameObjectPath === 'string' ? normalized.gameObjectPath.trim() : '';
+
+    // Unity-side prefab APIs sometimes validate `gameObjectPath`, while the tool schema exposes `instancePath`.
+    if (instancePath.length > 0 && gameObjectPath.length === 0) {
+      normalized.gameObjectPath = instancePath;
+    }
+  }
 
   if (toolName.startsWith('unity.uitoolkit.')) {
     const gameObject = typeof normalized.gameObject === 'string' ? normalized.gameObject.trim() : '';
@@ -532,4 +606,221 @@ export function clampTimeoutMs(timeoutMs, config) {
     return config.defaultToolTimeoutMs;
   }
   return Math.min(timeoutMs, config.maxToolTimeoutMs);
+}
+
+function truncateString(value, limit) {
+  if (value.length <= limit) {
+    return value;
+  }
+
+  if (limit === 1) {
+    return '…';
+  }
+
+  return `${value.slice(0, limit - 1)}…`;
+}
+
+export function truncateUnityLogHistoryPayload(payload, { maxMessageChars, maxStackTraceChars } = {}) {
+  if (!payload || typeof payload !== 'object') {
+    return payload;
+  }
+
+  const logs = Array.isArray(payload.logs) ? payload.logs : null;
+  if (!logs) {
+    return payload;
+  }
+
+  const messageLimit = parsePositiveInt(maxMessageChars, null);
+  const stackTraceLimit = parsePositiveInt(maxStackTraceChars, null);
+  if (!Number.isFinite(messageLimit) && !Number.isFinite(stackTraceLimit)) {
+    return payload;
+  }
+
+  let changed = false;
+  const nextLogs = logs.map((entry) => {
+    if (!entry || typeof entry !== 'object') {
+      return entry;
+    }
+
+    const nextEntry = { ...entry };
+
+    if (Number.isFinite(messageLimit) && typeof nextEntry.message === 'string') {
+      const truncated = truncateString(nextEntry.message, messageLimit);
+      if (truncated !== nextEntry.message) {
+        nextEntry.message = truncated;
+        changed = true;
+      }
+    }
+
+    if (Number.isFinite(stackTraceLimit) && typeof nextEntry.stackTrace === 'string') {
+      const truncated = truncateString(nextEntry.stackTrace, stackTraceLimit);
+      if (truncated !== nextEntry.stackTrace) {
+        nextEntry.stackTrace = truncated;
+        changed = true;
+      }
+    }
+
+    return nextEntry;
+  });
+
+  if (!changed) {
+    return payload;
+  }
+
+  return { ...payload, logs: nextLogs };
+}
+
+function tokenizeFilterString(filter) {
+  if (typeof filter !== 'string') {
+    return [];
+  }
+
+  const tokens = [];
+  let current = '';
+  let quote = null;
+
+  for (const char of filter.trim()) {
+    if (quote) {
+      if (char === quote) {
+        quote = null;
+        continue;
+      }
+      current += char;
+      continue;
+    }
+
+    if (char === '"' || char === "'") {
+      quote = char;
+      continue;
+    }
+
+    if (/\s/.test(char)) {
+      if (current.length > 0) {
+        tokens.push(current);
+        current = '';
+      }
+      continue;
+    }
+
+    current += char;
+  }
+
+  if (current.length > 0) {
+    tokens.push(current);
+  }
+
+  return tokens;
+}
+
+export function parseUnityAssetFilter(filter) {
+  const tokens = tokenizeFilterString(filter);
+  let assetType = null;
+  let name = null;
+  let guid = null;
+  let assetPath = null;
+  const textTokens = [];
+
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i];
+    const match = /^([A-Za-z]+)\s*:\s*(.*)$/.exec(token);
+    if (!match) {
+      textTokens.push(token);
+      continue;
+    }
+
+    const key = match[1].toLowerCase();
+    let value = match[2];
+    if (value.trim().length === 0 && i + 1 < tokens.length) {
+      // Support filters with spaces like: "t: Material"
+      value = tokens[i + 1];
+      i++;
+    }
+
+    const normalizedValue = String(value).trim();
+    if (normalizedValue.length === 0) {
+      continue;
+    }
+
+    if (key === 't' && !assetType) {
+      assetType = normalizedValue;
+      continue;
+    }
+    if (key === 'name' && !name) {
+      name = normalizedValue;
+      continue;
+    }
+    if (key === 'guid' && !guid) {
+      guid = normalizedValue;
+      continue;
+    }
+    if (key === 'path' && !assetPath) {
+      assetPath = normalizedValue;
+      continue;
+    }
+
+    textTokens.push(token);
+  }
+
+  return {
+    raw: typeof filter === 'string' ? filter : '',
+    assetType,
+    name,
+    guid,
+    path: assetPath,
+    tokens: textTokens,
+  };
+}
+
+export function normalizeSearchInFolders(searchInFolders) {
+  if (Array.isArray(searchInFolders)) {
+    return searchInFolders
+      .filter((value) => typeof value === 'string')
+      .map((value) => value.trim())
+      .filter((value) => value.length > 0);
+  }
+
+  if (typeof searchInFolders === 'string') {
+    const trimmed = searchInFolders.trim();
+    return trimmed.length > 0 ? [trimmed] : [];
+  }
+
+  return [];
+}
+
+export function filterAssetCandidates(assets, parsedFilter) {
+  const nameNeedle = typeof parsedFilter?.name === 'string' ? parsedFilter.name.trim().toLowerCase() : '';
+  const tokens = Array.isArray(parsedFilter?.tokens)
+    ? parsedFilter.tokens.map((token) => String(token).trim().toLowerCase()).filter((token) => token.length > 0)
+    : [];
+
+  const result = [];
+  for (const asset of Array.isArray(assets) ? assets : []) {
+    if (!asset || typeof asset !== 'object') {
+      continue;
+    }
+
+    const assetName = typeof asset.name === 'string' ? asset.name : '';
+    const assetPath = typeof asset.path === 'string' ? asset.path : '';
+    const nameLower = assetName.toLowerCase();
+    const hayLower = `${assetName} ${assetPath}`.toLowerCase();
+
+    if (nameNeedle.length > 0 && !nameLower.includes(nameNeedle)) {
+      continue;
+    }
+
+    let ok = true;
+    for (const token of tokens) {
+      if (!hayLower.includes(token)) {
+        ok = false;
+        break;
+      }
+    }
+    if (!ok) {
+      continue;
+    }
+
+    result.push(asset);
+  }
+
+  return result;
 }

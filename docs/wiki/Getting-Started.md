@@ -55,3 +55,9 @@ MCP クライアントから次を実行します。
 削除/ビルド/インポート等の破壊的操作は、Bridge 側で `__confirm: true` が必須です。
 また、GameObject のターゲットが曖昧な場合は実行せずに候補一覧（パス）を返します。
 
+## ログ確認（推奨）
+
+制作中の見落としを減らすため、各 `unity.*` ツール呼び出しの直後に `unity.log.history` を実行して Warning/Error を確認する運用を推奨します。
+
+- 例: `unity.log.history({ limit: 200, level: "Error,Warning" })`
+- 詳細は `docs/wiki/MCP-Bridge.md` の「運用: 各ツール呼び出し後にログ確認（推奨）」を参照してください。

@@ -1,6 +1,6 @@
 # UI Toolkit Extension
 
-`unity.uitoolkit.*` ツール群は一覧に表示されますが、利用には追加の拡張が必要です。
+`unity.uitoolkit.*` ツール群は一覧に表示されますが、利用には追加の拡張が必要です（`tools/list` の description に `[Optional] ...` の注記が付きます）。
 
 ## 必要な拡張
 
@@ -21,4 +21,3 @@
 UI Toolkit 系ツールで `gameObjectPath` / `gameObjectName` を渡しても動くよう、Bridge が `gameObject` へ補正します。
 
 > `com.unity.ui.test-framework`（UI Test Framework）は上記拡張の代替ではありません。
-

@@ -53,6 +53,7 @@ The bridge reads configuration from:
    - `MCP_HEAVY_TOOL_TIMEOUT_MS` - Heavy tool call timeout in ms (default: `300000`)
    - `MCP_MAX_TOOL_TIMEOUT_MS` - Hard cap for tool call timeout in ms (default: `600000`)
    - `MCP_REQUIRE_CONFIRMATION` - Require explicit confirmation for potentially destructive tools (default: `true`)
+   - `MCP_ENABLE_UNSAFE_EDITOR_INVOKE` - Expose `unity.editor.invokeStaticMethod` (default: `false`, always requires `__confirm: true`)
    - `MCP_REQUIRE_UNAMBIGUOUS_TARGETS` - Block destructive calls that specify targets only by name (default: `true`)
    - `MCP_SCENE_LIST_MAX_DEPTH` - Max depth for internal `unity.scene.list` preflight (default: `20`, max: `100`)
    - `MCP_AMBIGUOUS_CANDIDATE_LIMIT` - Candidate list size in ambiguity errors (default: `25`, max: `200`)
@@ -76,6 +77,16 @@ If you need to override the timeout for a specific tool call, pass one of these 
 
 The bridge strips these keys before forwarding the call to Unity.
 
+### unity.log.history Truncation (Optional, Opt-in)
+
+To avoid forcing truncation on all users, log message/stackTrace truncation is opt-in for `unity.log.history` only.
+Pass one or both keys in the tool arguments:
+
+- `__maxMessageChars` / `__max_message_chars`
+- `__maxStackTraceChars` / `__max_stack_trace_chars`
+
+The bridge strips these keys before forwarding the call to Unity.
+
 ### Confirmation & Safety Flags
 
 Some tools are treated as potentially destructive (delete/remove/build/import/project-settings changes).
@@ -83,6 +94,10 @@ To run them, pass:
 
 - `__confirm: true`
 - (optional) `__confirmNote: "why this is safe"`
+
+`unity.editor.invokeStaticMethod` is special: it can execute arbitrary public static methods inside Unity Editor.
+The bridge disables it by default (and hides it from `tools/list`) unless `MCP_ENABLE_UNSAFE_EDITOR_INVOKE=true`.
+Even when enabled, it always requires `__confirm: true`.
 
 If a destructive tool targets a scene object ambiguously, the bridge blocks it by default and returns a candidate list.
 This includes:
@@ -106,7 +121,24 @@ The bridge automatically adds aliases so you can call tools with either key:
 - `unity.asset.delete`: `path` → also sent as `assetPath` (if missing)
 - `unity.asset.createFolder`: `parentFolder` + `newFolderName` → also sent as `path` (if missing)
 - `unity.asset.list`: `filter` like `t:Material` → also sent as `assetType` (if missing)
+- `unity.component.setReference`: if `referenceType` is missing, bridge infers it (`asset` for `Assets/...` / `Packages/...`, otherwise `gameObject` or `component`) and may retry automatically. For `Sprite` fields, `setReference` may fail when `referencePath` points to a texture file (Texture2D main asset); use `unity.assetImport.listSprites` + `unity.component.setSpriteReference` to select an explicit Sprite sub-asset (no silent fallback).
 - `unity.uitoolkit.*`: `gameObjectPath` / `gameObjectName` → also sent as `gameObject` (and `gameObject` → also sent as `gameObjectPath`) for better compatibility
+
+### Tool Overrides
+
+- `unity.editor.listMenuItems`: Bridge provides a robust implementation that enumerates `MenuItem` attributes (supports `filter`).
+- `unity.assetImport.setTextureType`: Bridge tool that sets `TextureImporter.textureType` (e.g. `Sprite`) and optionally reimports (requires `__confirm: true`). This is a safe fallback when `unity.import.*` tools are unavailable (they depend on the optional `LocalMcp.UnityServer.AssetImport.Editor` extension).
+- `unity.assetImport.listSprites`: Bridge tool that lists Sprite sub-assets at a texture path (useful for sprite sheets).
+- `unity.component.setSpriteReference`: Bridge tool that sets a Sprite reference by `spriteName` (avoid implicit selection when multiple sprites exist).
+
+### Optional Tools Annotation
+
+Some tool families depend on Unity packages / optional extensions (e.g. Cinemachine, Timeline, UI Toolkit extension).
+The bridge keeps these tools visible, but appends `[Optional] ...` notes to `tools/list` descriptions.
+
+Note: Some optional families are implemented as Unity-side *extension assemblies*.
+If the required extension assembly is not present in your Unity project, the call may fail with a misleading “package is not installed” message even when the Unity package is installed.
+In this fork/package, `unity.cinemachine.*` / `unity.timeline.*` fall into that category (see the root `README.md` for details and workarounds).
 
 ## Troubleshooting
 
