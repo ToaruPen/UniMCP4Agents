@@ -63,6 +63,15 @@ const PREFLIGHT_SCENE_LIST_TIMEOUT_MS = BRIDGE_CONFIG.preflightSceneListTimeoutM
 const ENABLE_UNSAFE_EDITOR_INVOKE = BRIDGE_CONFIG.enableUnsafeEditorInvoke;
 
 function patchUnityToolSchemas(unityTools) {
+  const uiToolkitRuntimeSelectorToolNames = new Set([
+    'unity.uitoolkit.runtime.setElementText',
+    'unity.uitoolkit.runtime.setElementValue',
+    'unity.uitoolkit.runtime.setElementVisibility',
+    'unity.uitoolkit.runtime.setElementEnabled',
+    'unity.uitoolkit.runtime.addRuntimeClass',
+    'unity.uitoolkit.runtime.removeRuntimeClass',
+  ]);
+
   return (unityTools || []).map((tool) => {
     if (!tool || typeof tool !== 'object') {
       return tool;
@@ -199,6 +208,125 @@ function patchUnityToolSchemas(unityTools) {
 
       if (required) {
         patchedSchema.required = required;
+      }
+
+      return {
+        ...nextTool,
+        inputSchema: patchedSchema,
+      };
+    }
+
+    if (name === 'unity.uitoolkit.scene.configureUIDocument') {
+      const inputSchema =
+        nextTool.inputSchema && typeof nextTool.inputSchema === 'object' ? nextTool.inputSchema : { type: 'object' };
+      const properties = inputSchema.properties && typeof inputSchema.properties === 'object' ? inputSchema.properties : {};
+      return {
+        ...nextTool,
+        inputSchema: {
+          ...inputSchema,
+          properties: {
+            ...properties,
+            uxmlPath: {
+              type: 'string',
+              description: 'UXMLパス（任意）',
+            },
+            panelSettingsPath: {
+              type: 'string',
+              description: 'PanelSettingsパス（任意）',
+            },
+            sortingOrder: {
+              type: 'integer',
+              description: 'ソート順（任意）',
+            },
+          },
+        },
+      };
+    }
+
+    if (name === 'unity.uitoolkit.runtime.createUIDocument') {
+      const inputSchema =
+        nextTool.inputSchema && typeof nextTool.inputSchema === 'object' ? nextTool.inputSchema : { type: 'object' };
+      const properties = inputSchema.properties && typeof inputSchema.properties === 'object' ? inputSchema.properties : {};
+      return {
+        ...nextTool,
+        inputSchema: {
+          ...inputSchema,
+          properties: {
+            ...properties,
+            panelSettingsPath: {
+              type: 'string',
+              description: 'PanelSettingsパス（任意）',
+            },
+            sortingOrder: {
+              type: 'integer',
+              description: 'ソート順（任意）',
+            },
+          },
+        },
+      };
+    }
+
+    if (name === 'unity.uitoolkit.runtime.queryElement') {
+      const inputSchema =
+        nextTool.inputSchema && typeof nextTool.inputSchema === 'object' ? nextTool.inputSchema : { type: 'object' };
+      const properties = inputSchema.properties && typeof inputSchema.properties === 'object' ? inputSchema.properties : {};
+      return {
+        ...nextTool,
+        inputSchema: {
+          ...inputSchema,
+          properties: {
+            ...properties,
+            selector: {
+              type: 'string',
+              description: 'USSセレクタ（例: "#HPLabel" / ".some-class"）',
+            },
+            query: {
+              ...(properties.query && typeof properties.query === 'object' ? properties.query : { type: 'string' }),
+              description:
+                'クエリ（bridge互換: Unity側は selector を要求する場合があります。Bridge は query → selector を自動変換します）',
+            },
+          },
+          required: ['gameObjectPath'],
+          anyOf: [{ required: ['selector'] }, { required: ['query'] }],
+        },
+      };
+    }
+
+    if (uiToolkitRuntimeSelectorToolNames.has(name)) {
+      const inputSchema =
+        nextTool.inputSchema && typeof nextTool.inputSchema === 'object' ? nextTool.inputSchema : { type: 'object' };
+      const properties = inputSchema.properties && typeof inputSchema.properties === 'object' ? inputSchema.properties : {};
+
+      // Most runtime APIs accept a USS selector on the Unity side. Keep `elementName` for back-compat and let the bridge
+      // convert it into `selector` (e.g. "HPLabel" -> "#HPLabel").
+      const patchedSchema = {
+        ...inputSchema,
+        properties: {
+          ...properties,
+          selector: {
+            type: 'string',
+            description: 'USSセレクタ（例: "#HPLabel"）。elementName の代わりに指定できます。',
+          },
+          elementName: {
+            ...(properties.elementName && typeof properties.elementName === 'object'
+              ? properties.elementName
+              : { type: 'string' }),
+            description:
+              '要素名（bridge互換: Unity側は selector を要求する場合があります。Bridge は elementName → selector を自動変換します）',
+          },
+        },
+      };
+
+      const required = new Set(Array.isArray(patchedSchema.required) ? patchedSchema.required : []);
+      required.delete('elementName');
+      patchedSchema.required = Array.from(required);
+
+      // Require at least one of selector/elementName.
+      patchedSchema.anyOf = [{ required: ['selector'] }, { required: ['elementName'] }];
+
+      // Ensure gameObjectPath remains required for these tools.
+      if (!patchedSchema.required.includes('gameObjectPath')) {
+        patchedSchema.required.push('gameObjectPath');
       }
 
       return {

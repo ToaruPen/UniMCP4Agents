@@ -305,6 +305,37 @@ export function normalizeUnityArguments(toolName, args) {
         normalized.gameObjectPath = aliasSource;
       }
     }
+
+    // Some runtime UIToolkit tools use `selector` on the Unity side, while the tool schema exposes
+    // `query` or `elementName`. Normalize into a `selector` argument.
+    if (toolName.startsWith('unity.uitoolkit.runtime.')) {
+      const selector = typeof normalized.selector === 'string' ? normalized.selector.trim() : '';
+      if (selector.length > 0) {
+        normalized.selector = selector;
+        if (Object.prototype.hasOwnProperty.call(normalized, 'query')) {
+          delete normalized.query;
+        }
+        if (Object.prototype.hasOwnProperty.call(normalized, 'elementName')) {
+          delete normalized.elementName;
+        }
+      } else {
+        const query = typeof normalized.query === 'string' ? normalized.query.trim() : '';
+        if (query.length > 0) {
+          normalized.selector = query;
+          delete normalized.query;
+        }
+
+        const selectorAfterQuery = typeof normalized.selector === 'string' ? normalized.selector.trim() : '';
+        if (selectorAfterQuery.length === 0) {
+          const elementName = typeof normalized.elementName === 'string' ? normalized.elementName.trim() : '';
+          if (elementName.length > 0) {
+            const looksLikeSelector = /^[#.[*:]/.test(elementName) || elementName.includes(' ') || elementName.includes('>');
+            normalized.selector = looksLikeSelector ? elementName : `#${elementName}`;
+            delete normalized.elementName;
+          }
+        }
+      }
+    }
   }
 
   if (

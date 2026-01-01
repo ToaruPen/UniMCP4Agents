@@ -325,6 +325,59 @@ test('normalizeUnityArguments', () => {
     normalizeUnityArguments('unity.uitoolkit.runtime.getUIDocument', { gameObject: '   ' }),
     { gameObject: '   ' }
   );
+  assert.deepEqual(
+    normalizeUnityArguments('unity.uitoolkit.runtime.queryElement', { gameObjectPath: 'Root/UiDoc', query: '#HPLabel' }),
+    { gameObjectPath: 'Root/UiDoc', gameObject: 'Root/UiDoc', selector: '#HPLabel' }
+  );
+  assert.deepEqual(
+    normalizeUnityArguments('unity.uitoolkit.runtime.queryElement', {
+      gameObjectPath: 'Root/UiDoc',
+      selector: ' #HPLabel ',
+      query: '#Ignored',
+    }),
+    { gameObjectPath: 'Root/UiDoc', gameObject: 'Root/UiDoc', selector: '#HPLabel' }
+  );
+  assert.deepEqual(
+    normalizeUnityArguments('unity.uitoolkit.runtime.setElementText', {
+      gameObjectPath: 'Root/UiDoc',
+      elementName: 'HPLabel',
+      text: 'HP: 7',
+    }),
+    { gameObjectPath: 'Root/UiDoc', text: 'HP: 7', gameObject: 'Root/UiDoc', selector: '#HPLabel' }
+  );
+  assert.deepEqual(
+    normalizeUnityArguments('unity.uitoolkit.runtime.setElementText', {
+      gameObjectPath: 'Root/UiDoc',
+      selector: ' #HPLabel ',
+      elementName: 'HPLabel',
+      text: 'HP: 7',
+    }),
+    { gameObjectPath: 'Root/UiDoc', text: 'HP: 7', gameObject: 'Root/UiDoc', selector: '#HPLabel' }
+  );
+  assert.deepEqual(
+    normalizeUnityArguments('unity.uitoolkit.runtime.setElementText', {
+      gameObjectPath: 'Root/UiDoc',
+      elementName: '#HPLabel',
+      text: 'HP: 7',
+    }),
+    { gameObjectPath: 'Root/UiDoc', text: 'HP: 7', gameObject: 'Root/UiDoc', selector: '#HPLabel' }
+  );
+  assert.deepEqual(
+    normalizeUnityArguments('unity.uitoolkit.runtime.setElementText', {
+      gameObjectPath: 'Root/UiDoc',
+      elementName: 'Label > Child',
+      text: 'HP: 7',
+    }),
+    { gameObjectPath: 'Root/UiDoc', text: 'HP: 7', gameObject: 'Root/UiDoc', selector: 'Label > Child' }
+  );
+  assert.deepEqual(
+    normalizeUnityArguments('unity.uitoolkit.runtime.setElementText', {
+      gameObjectPath: 'Root/UiDoc',
+      elementName: 'Label>Child',
+      text: 'HP: 7',
+    }),
+    { gameObjectPath: 'Root/UiDoc', text: 'HP: 7', gameObject: 'Root/UiDoc', selector: 'Label>Child' }
+  );
 
   assert.deepEqual(
     normalizeUnityArguments('unity.create', { type: 'Cube', name: 'Box' }),

@@ -2,6 +2,8 @@
 
 このドキュメントは、**UniMCP4CC（Unity MCP Server + Node MCP Bridge）を使って「2Dローグライクを作る」**という実使用に近い往復（コード編集 ↔ Unity Editor操作 ↔ 検証）を通し、**安全性・安定性・実用性**を検証するためのシナリオです。
 
+実行結果のまとめ（実使用レポート）: `test/realworld-report.md`
+
 > 重要: `unity.editor.invokeStaticMethod` は **既定で無効**のまま実行します（本シナリオでは使用しない）。
 
 ---
@@ -149,7 +151,8 @@ npm install
    - `RL_Runtime`（空。実行時生成を配置する親）
 4. シーン保存
 
-> 注意（Tilemapの落とし穴）: `TilemapRenderer` は `MeshFilter` などと競合します。`unity.create` で Quad 等の primitive を作ってしまうと TilemapRenderer を追加できず詰まりやすいので、Tilemap 用 GameObject は「空の GameObject」から作る（または `unity.editor.executeMenuItem("GameObject/2D Object/Tilemap/Rectangular")` を使う）こと。
+> 注意（Tilemapの落とし穴）: `TilemapRenderer` は `MeshFilter` などと競合します。`unity.create` で Quad 等の primitive を作ってしまうと TilemapRenderer を追加できず詰まりやすいので、Tilemap 用 GameObject は「空の GameObject」から作る（または `unity.editor.executeMenuItem("GameObject/2D Object/Tilemap/Rectangular")` を使う）こと。  
+> ※ `executeMenuItem` は Bridge の安全ゲートにより `__confirm: true` が必要です。
 
 **使用したいツール（例）**
 
@@ -267,15 +270,21 @@ npm install
 
 ---
 
-### Phase 5: UI（HP/フロア表示）＋ログ運用（10分）
+### Phase 5: UI Toolkit（HP/フロア表示）＋ログ運用（10分）
 
-**想定**: UI の生成・参照のような「ありがちな実制作作業」を踏む。
+**想定**: UI Toolkit ベースの UI 生成・参照・更新（制作の頻出動線）が成立すること。
 
 **実施**
 
-1. Canvas/UI を作り、HP/Seed/Floor を表示
-2. UI 更新を `GameManager` から行う
-3. `unity.log.history` の切り詰め（`__maxMessageChars` / `__maxStackTraceChars`）を意図的に使い、運用できることを確認
+1. `unity.uitoolkit.*` が利用できることを確認
+   - 失敗する場合は Samples の `UIToolkit Extension` を Import する（`LocalMcp.UnityServer.UIToolkit.Editor`）
+2. HUD 用の `UXML` / `USS` / `PanelSettings` を作成し、`UIDocument` に割り当てる
+   - 例: `Assets/Roguelike/UI/HUD.uxml`, `Assets/Roguelike/UI/HUD.uss`, `Assets/Roguelike/UI/HUD_PanelSettings.asset`
+   - `unity.uitoolkit.scene.createUIGameObject` → `unity.uitoolkit.scene.configureUIDocument`
+3. Play 中に HP/Seed/Floor の表示が更新されることを確認
+   - まずは `unity.uitoolkit.runtime.setElementText` で動作確認し、次に `GameManager` から UI を更新する経路を作る
+   - `selector`（例: `#HPLabel`）を使う（Bridge は `query` / `elementName` も吸収します）
+4. `unity.log.history` の切り詰め（`__maxMessageChars` / `__maxStackTraceChars`）を意図的に使い、運用できることを確認
 
 **期待結果**
 

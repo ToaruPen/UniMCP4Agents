@@ -123,6 +123,7 @@ The bridge automatically adds aliases so you can call tools with either key:
 - `unity.asset.list`: `filter` like `t:Material` → also sent as `assetType` (if missing)
 - `unity.component.setReference`: if `referenceType` is missing, bridge infers it (`asset` for `Assets/...` / `Packages/...`, otherwise `gameObject` or `component`) and may retry automatically. For `Sprite` fields, `setReference` may fail when `referencePath` points to a texture file (Texture2D main asset); use `unity.assetImport.listSprites` + `unity.component.setSpriteReference` to select an explicit Sprite sub-asset (no silent fallback).
 - `unity.uitoolkit.*`: `gameObjectPath` / `gameObjectName` → also sent as `gameObject` (and `gameObject` → also sent as `gameObjectPath`) for better compatibility
+- `unity.uitoolkit.runtime.*`: `query` / `elementName` → normalized into `selector` (Unity-side runtime APIs require a USS selector)
 
 ### Tool Overrides
 

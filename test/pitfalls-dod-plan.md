@@ -1,7 +1,7 @@
-# UniMCP4CC: 4つの「落とし穴」クローズ DoD / テストケース / 実装計画（Ash-n-Circuit非接触）
+# UniMCP4CC: 5つの「落とし穴」クローズ DoD / テストケース / 実装計画（Ash-n-Circuit非接触）
 
 このドキュメントは、UniMCP4CC（Unity MCP Server + Node MCP Bridge）を **2Dゲーム制作（Ash-n-Circuit）に導入する前提**で、
-既知の「落とし穴」4点を **“制作で詰まらない状態”にクローズ**するための **DoD（受け入れ条件）**と、実装/テストの計画をまとめます。
+既知の「落とし穴」5点を **“制作で詰まらない状態”にクローズ**するための **DoD（受け入れ条件）**と、実装/テストの計画をまとめます。
 
 > 重要: この計画は **Ash-n-Circuit（ゲーム本体）には一切触れない**。検証は **Unityテストプロジェクト**（`.../GitHub/Test/My project`）のみで行う。
 
@@ -23,8 +23,9 @@
 
 - **P0**: 1) `unity.component.setReference` の詰まり吸収（参照配線は制作の頻出動線）
 - **P0**: 2) Tilemap作成/TilemapRenderer追加の罠（2D制作の初手で詰む）
+- **P0**: 3) UI Toolkit runtime の詰まり吸収（UI Toolkit 制作の頻出動線）
 - **P1**: 4) 揺れ（PlayMode/再コンパイル）時の運用・ノイズ低減（停止を防ぐ）
-- **P2**: 3) invokeStaticMethod既定OFFの妥当性（方針維持＋必要時はallowlistで拡張）
+- **P2**: 5) invokeStaticMethod既定OFFの妥当性（方針維持＋必要時はallowlistで拡張）
 
 ---
 
@@ -46,6 +47,7 @@
 - 追加方針:
   - `scripts/e2e-setreference.js`（参照配線専用）
   - `scripts/e2e-tilemap.js`（Tilemap罠専用）
+  - `scripts/e2e-uitoolkit.js`（UI Toolkit runtime/スキーマ互換）
   - `scripts/e2e-invoke-safety.js`（安全設計の回帰防止）
   - `scripts/e2e-recompile-jitter.js`（再コンパイル瞬断の見え方/復帰）
   - `scripts/e2e-prefab.js`（Prefab 作成/Instantiate/Apply/Revert/Unpack）
@@ -189,7 +191,52 @@
 
 ---
 
-### 4.3 (P2) 安全設計（invokeStaticMethod既定OFF）の妥当性と必要機能の確保
+### 4.3 (P0) UI Toolkit（UIToolkit Extension）の実運用で詰まりやすい（schema/引数不一致）
+
+`unity.uitoolkit.runtime.*` の一部は Unity 側が `selector` を必須とする一方で、`tools/list` の schema が `query` / `elementName` になっているなど、**クライアント側が schema に従うと詰まる**ことがあります。
+
+#### DoD（必須）
+
+- `tools/list` 上で UI Toolkit runtime ツールが `selector` を露出し、`query` / `elementName` を使った呼び出しも Bridge が吸収できる
+  - 例: `unity.uitoolkit.runtime.queryElement` は `query` でも動く（Bridge が `selector` に変換）
+  - 例: `unity.uitoolkit.runtime.setElementText` は `elementName:"HPLabel"` でも動く（Bridge が `selector:\"#HPLabel\"` に変換）
+- `unity.uitoolkit.scene.configureUIDocument` の schema に `uxmlPath` / `panelSettingsPath` が露出し、クライアントがそれらを指定して UIDocument を構成できる
+
+#### テストケース（UITK = UI Toolkit）
+
+**UITK-01 schema（selector/UIDocument設定が見える）**
+- When: `tools/list` を取得する
+- Then: `unity.uitoolkit.runtime.queryElement` / `setElementText` に `selector` が含まれる
+- And: `unity.uitoolkit.scene.configureUIDocument` に `uxmlPath` / `panelSettingsPath` が含まれる
+
+**UITK-02 UXML/USS/PanelSettings の作成**
+- When: `unity.uitoolkit.asset.*` で UXML/USS/PanelSettings を作る
+- Then: 失敗しない
+
+**UITK-03 UIDocument の構成**
+- When: `unity.uitoolkit.scene.createUIGameObject` → `configureUIDocument`
+- Then: `unity.uitoolkit.runtime.getUIDocument` で `uxmlPath` / `panelSettingsPath` が設定済みである
+
+**UITK-04 runtime.queryElement（query互換）**
+- Given: PlayMode ON
+- When: `unity.uitoolkit.runtime.queryElement` を `query:\"#HPLabel\"` で呼ぶ
+- Then: 成功する（Bridge が selector を補完）
+
+**UITK-05 runtime.setElementText（elementName互換）**
+- Given: PlayMode ON
+- When: `unity.uitoolkit.runtime.setElementText` を `elementName:\"HPLabel\"` で呼ぶ
+- Then: 成功する（Bridge が selector を補完）
+
+#### 実装タスク（計画）
+
+- [x] Bridge: `normalizeUnityArguments` に UI Toolkit runtime の `query`/`elementName` → `selector` 変換を追加
+- [x] Bridge: `tools/list` の schema patch を追加（UI Toolkit runtime / configureUIDocument）
+- [x] E2E: `scripts/e2e-uitoolkit.js` 追加（UITK-01〜05）
+- [x] docs: `test/scenario.md` Phase 5 を UI Toolkit 版へ更新
+
+---
+
+### 4.4 (P2) 安全設計（invokeStaticMethod既定OFF）の妥当性と必要機能の確保
 
 #### DoD（必須）
 
@@ -230,7 +277,7 @@
 
 ---
 
-### 4.4 (P1) 揺れ（PlayMode/再コンパイル）時の運用・保守性
+### 4.5 (P1) 揺れ（PlayMode/再コンパイル）時の運用・保守性
 
 #### DoD（必須）
 
@@ -316,10 +363,12 @@ node scripts/playmode-ab.js --project "/Users/.../GitHub/Test/My project" --cycl
 
 > 注意: ここに記載の検証は **Ash-n-Circuit（ゲーム本体）を一切触らず**、Unityテストプロジェクトのみで実施した。
 
+実使用レポート（実行結果のまとめ）: `test/realworld-report.md`
+
 ### 8.1 実行環境
 
 - Repo: `.../GitHub/Unity_MCP/UniMCP4CC`（HEAD: `915959f`）
-- Unityテストプロジェクト: `/Users/sankenbisha/Library/CloudStorage/GoogleDrive-pen3250@gmail.com/マイドライブ/GitHub/Test/My project`
+- Unityテストプロジェクト: `<UNITY_PROJECT_ROOT>`
 - Unity: `6000.3.2f1`
 - MCP Bridge URL: `http://localhost:5051`
   - `curl http://localhost:5051/health` → `{"status":"ok","projectName":"My project","unityVersion":"6000.3.2f1","timestamp":1767108937}`
@@ -335,22 +384,22 @@ Node（Bridge単体）:
 
 Unity E2E（Node → Bridge → Unity）:
 
-- `cd Server~/mcp-bridge && npm run smoke -- --project "/Users/sankenbisha/Library/CloudStorage/GoogleDrive-pen3250@gmail.com/マイドライブ/GitHub/Test/My project" --verbose`
+- `cd Server~/mcp-bridge && npm run smoke -- --project "<UNITY_PROJECT_ROOT>" --verbose`
   - PASS: `/tmp/unimcp_smoke.out`
-- `cd Server~/mcp-bridge && node scripts/e2e-setreference.js --project "/Users/sankenbisha/Library/CloudStorage/GoogleDrive-pen3250@gmail.com/マイドライブ/GitHub/Test/My project" --verbose`
+- `cd Server~/mcp-bridge && node scripts/e2e-setreference.js --project "<UNITY_PROJECT_ROOT>" --verbose`
   - PASS: `/tmp/unimcp_e2e_setreference.out`
-- `cd Server~/mcp-bridge && node scripts/e2e-tilemap.js --project "/Users/sankenbisha/Library/CloudStorage/GoogleDrive-pen3250@gmail.com/マイドライブ/GitHub/Test/My project" --verbose`
+- `cd Server~/mcp-bridge && node scripts/e2e-tilemap.js --project "<UNITY_PROJECT_ROOT>" --verbose`
   - PASS: `/tmp/unimcp_e2e_tilemap.out`
-- `cd Server~/mcp-bridge && node scripts/e2e-invoke-safety.js --project "/Users/sankenbisha/Library/CloudStorage/GoogleDrive-pen3250@gmail.com/マイドライブ/GitHub/Test/My project" --verbose`
+- `cd Server~/mcp-bridge && node scripts/e2e-invoke-safety.js --project "<UNITY_PROJECT_ROOT>" --verbose`
   - PASS: `/tmp/unimcp_e2e_invoke_safety.out`
-- `cd Server~/mcp-bridge && node scripts/e2e-recompile-jitter.js --project "/Users/sankenbisha/Library/CloudStorage/GoogleDrive-pen3250@gmail.com/マイドライブ/GitHub/Test/My project" --verbose`
+- `cd Server~/mcp-bridge && node scripts/e2e-recompile-jitter.js --project "<UNITY_PROJECT_ROOT>" --verbose`
   - PASS: `/tmp/unimcp_e2e_recompile_jitter.out`
-- `cd Server~/mcp-bridge && node scripts/e2e-prefab.js --project "/Users/sankenbisha/Library/CloudStorage/GoogleDrive-pen3250@gmail.com/マイドライブ/GitHub/Test/My project" --verbose`
+- `cd Server~/mcp-bridge && node scripts/e2e-prefab.js --project "<UNITY_PROJECT_ROOT>" --verbose`
   - PASS: `/tmp/unimcp_e2e_prefab.out`
-- `cd Server~/mcp-bridge && node scripts/e2e-asset-import-reference.js --project "/Users/sankenbisha/Library/CloudStorage/GoogleDrive-pen3250@gmail.com/マイドライブ/GitHub/Test/My project" --verbose`
+- `cd Server~/mcp-bridge && node scripts/e2e-asset-import-reference.js --project "<UNITY_PROJECT_ROOT>" --verbose`
   - PASS: `/tmp/unimcp_e2e_asset_import_reference.out`
-- `cd Server~/mcp-bridge && node scripts/e2e-ambiguous-destroy.js --project "/Users/sankenbisha/Library/CloudStorage/GoogleDrive-pen3250@gmail.com/マイドライブ/GitHub/Test/My project" --verbose`
+- `cd Server~/mcp-bridge && node scripts/e2e-ambiguous-destroy.js --project "<UNITY_PROJECT_ROOT>" --verbose`
   - PASS: `/tmp/unimcp_e2e_ambiguous_destroy.out`
-- `cd Server~/mcp-bridge && node scripts/playmode-ab.js --project "/Users/sankenbisha/Library/CloudStorage/GoogleDrive-pen3250@gmail.com/マイドライブ/GitHub/Test/My project" --cycles 50`
+- `cd Server~/mcp-bridge && node scripts/playmode-ab.js --project "<UNITY_PROJECT_ROOT>" --cycles 50`
   - PASS: `/tmp/unimcp_playmode_ab_50.out`
   - Parsed summary: `/tmp/unimcp_playmode_ab_50_summary.out`（`errors.total=0`）

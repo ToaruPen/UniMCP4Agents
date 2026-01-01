@@ -20,4 +20,9 @@
 
 UI Toolkit 系ツールで `gameObjectPath` / `gameObjectName` を渡しても動くよう、Bridge が `gameObject` へ補正します。
 
+また、`unity.uitoolkit.runtime.*` の一部ツールは Unity 側が `selector`（USS セレクタ）を要求するため、Bridge は次を吸収します。
+
+- `query` → `selector`（例: `"#HPLabel"`）
+- `elementName` → `selector`（例: `"HPLabel"` → `"#HPLabel"`）
+
 > `com.unity.ui.test-framework`（UI Test Framework）は上記拡張の代替ではありません。
