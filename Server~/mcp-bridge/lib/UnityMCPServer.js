@@ -13,6 +13,7 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprot
 import fs from 'fs';
 import path from 'path';
 import { httpGet, httpPost } from './http.js';
+import { loadBridgeConfig } from './bridgeConfig.js';
 import { tryReadRuntimeConfig } from './runtimeConfig.js';
 import { patchUnityToolSchemas } from './toolSchemaPatch.js';
 import {
@@ -34,6 +35,7 @@ import {
   isUnambiguousTargetRequiredToolName,
   normalizeSearchInFolders,
   normalizeUnityArguments,
+  parseBoolean,
   parseUnityAssetFilter,
   truncateUnityLogHistoryPayload,
 } from './bridgeLogic.js';
@@ -50,8 +52,13 @@ const ASSET_IMPORT_TYPE = 'UniMCP4CC.Editor.McpAssetImport';
 const ASSET_IMPORT_SET_TEXTURE_TYPE_METHOD = 'SetTextureTypeBase64';
 const ASSET_IMPORT_SET_SPRITE_REFERENCE_METHOD = 'SetSpriteReferenceBase64';
 const ASSET_IMPORT_LIST_SPRITES_METHOD = 'ListSpritesBase64';
+const COMPONENT_TOOLS_TYPE = 'UniMCP4CC.Editor.McpComponentTools';
+const COMPONENT_ADD_METHOD = 'AddComponentBase64';
+const GAMEOBJECT_TOOLS_TYPE = 'UniMCP4CC.Editor.McpGameObjectTools';
+const GAMEOBJECT_CREATE_EMPTY_SAFE_METHOD = 'CreateEmptySafeBase64';
 
-const BRIDGE_CONFIG = createBridgeConfig(process.env);
+const BRIDGE_FILE_CONFIG = loadBridgeConfig(process.env);
+const BRIDGE_CONFIG = createBridgeConfig(process.env, BRIDGE_FILE_CONFIG.config);
 const DEFAULT_TOOL_TIMEOUT_MS = BRIDGE_CONFIG.defaultToolTimeoutMs;
 const HEAVY_TOOL_TIMEOUT_MS = BRIDGE_CONFIG.heavyToolTimeoutMs;
 const MAX_TOOL_TIMEOUT_MS = BRIDGE_CONFIG.maxToolTimeoutMs;
@@ -63,6 +70,15 @@ const SCENE_LIST_MAX_DEPTH = BRIDGE_CONFIG.sceneListMaxDepth;
 const AMBIGUOUS_CANDIDATE_LIMIT = BRIDGE_CONFIG.ambiguousCandidateLimit;
 const PREFLIGHT_SCENE_LIST_TIMEOUT_MS = BRIDGE_CONFIG.preflightSceneListTimeoutMs;
 const ENABLE_UNSAFE_EDITOR_INVOKE = BRIDGE_CONFIG.enableUnsafeEditorInvoke;
+
+if (BRIDGE_FILE_CONFIG.error) {
+  console.error(`[MCP Bridge] ${BRIDGE_FILE_CONFIG.error}`);
+}
+if (Array.isArray(BRIDGE_FILE_CONFIG.warnings) && BRIDGE_FILE_CONFIG.warnings.length > 0) {
+  for (const warning of BRIDGE_FILE_CONFIG.warnings) {
+    console.error(`[MCP Bridge] Config warning: ${warning}`);
+  }
+}
 
 function buildEmptyAssetResult() {
   return {
@@ -459,6 +475,116 @@ async function handleAssetImportListSprites(unityHttpUrl, args, timeoutMs) {
   } catch (error) {
     return {
       content: [{ type: 'text', text: `Failed to parse listSprites result: ${error.message}` }],
+      isError: true,
+    };
+  }
+}
+
+async function handleComponentAdd(unityHttpUrl, args, timeoutMs) {
+  const gameObjectPath =
+    typeof args?.path === 'string'
+      ? args.path.trim()
+      : typeof args?.gameObjectPath === 'string'
+        ? args.gameObjectPath.trim()
+        : typeof args?.hierarchyPath === 'string'
+          ? args.hierarchyPath.trim()
+          : '';
+
+  const componentType =
+    typeof args?.componentType === 'string'
+      ? args.componentType.trim()
+      : typeof args?.type === 'string'
+        ? args.type.trim()
+        : '';
+
+  const removeConflictingRenderers = parseBoolean(
+    args?.removeConflictingRenderers ?? args?.remove_conflicting_renderers,
+    false
+  );
+
+  if (gameObjectPath.length === 0 || componentType.length === 0) {
+    return {
+      content: [
+        {
+          type: 'text',
+          text:
+            `unity.component.add requires:\n` +
+            `- path: "Root/Child" (GameObject path)\n` +
+            `- componentType: "SpriteRenderer" or "MyComponent"`,
+        },
+      ],
+      isError: true,
+    };
+  }
+
+  const invokeArgs = {
+    typeName: COMPONENT_TOOLS_TYPE,
+    methodName: COMPONENT_ADD_METHOD,
+    parameters: [gameObjectPath, componentType, removeConflictingRenderers],
+  };
+
+  const invokeCall = await tryCallUnityTool(unityHttpUrl, 'unity.editor.invokeStaticMethod', invokeArgs, timeoutMs);
+  if (!invokeCall.ok) {
+    const message = invokeCall.error?.message || 'Unknown JSON-RPC error';
+    const code = invokeCall.error?.code;
+    const details = code ? ` (code: ${code})` : '';
+    return { content: [{ type: 'text', text: `Unity JSON-RPC error${details}: ${message}` }], isError: true };
+  }
+
+  try {
+    const parsed = parseInvokeStaticMethodBase64Payload(invokeCall, 'component add helper');
+    return {
+      content: [{ type: 'text', text: JSON.stringify(parsed.payload, null, 2) }],
+      isError: parsed.isError,
+    };
+  } catch (error) {
+    return {
+      content: [{ type: 'text', text: `Failed to parse component.add result: ${error.message}` }],
+      isError: true,
+    };
+  }
+}
+
+async function handleGameObjectCreateEmptySafe(unityHttpUrl, args, timeoutMs) {
+  const name = typeof args?.name === 'string' ? args.name.trim() : '';
+  const parentPath = typeof args?.parentPath === 'string' ? args.parentPath.trim() : '';
+  const active = parseBoolean(args?.active, true);
+
+  if (name.length === 0) {
+    return {
+      content: [
+        {
+          type: 'text',
+          text: `unity.gameObject.createEmptySafe requires:\n- name: "GameObjectName"\n- (optional) parentPath: "Root/Child"\n- (optional) active: true/false`,
+        },
+      ],
+      isError: true,
+    };
+  }
+
+  const invokeArgs = {
+    typeName: GAMEOBJECT_TOOLS_TYPE,
+    methodName: GAMEOBJECT_CREATE_EMPTY_SAFE_METHOD,
+    parameters: [name, parentPath, active],
+  };
+
+  const invokeCall = await tryCallUnityTool(unityHttpUrl, 'unity.editor.invokeStaticMethod', invokeArgs, timeoutMs);
+  if (!invokeCall.ok) {
+    const message = invokeCall.error?.message || 'Unknown JSON-RPC error';
+    const code = invokeCall.error?.code;
+    const details = code ? ` (code: ${code})` : '';
+    return { content: [{ type: 'text', text: `Unity JSON-RPC error${details}: ${message}` }], isError: true };
+  }
+
+  try {
+    const parsed = parseInvokeStaticMethodBase64Payload(invokeCall, 'create empty safe helper');
+    return {
+      content: [{ type: 'text', text: JSON.stringify(parsed.payload, null, 2) }],
+      isError: parsed.isError,
+    };
+  } catch (error) {
+    return {
+      content: [{ type: 'text', text: `Failed to parse createEmptySafe result: ${error.message}` }],
       isError: true,
     };
   }
@@ -1077,6 +1203,53 @@ export class UnityMCPServer {
         },
       },
       {
+        name: 'unity.component.add',
+        description:
+          'Add a component via a guarded UnityEditor helper (better errors for ambiguous targets/types; removeConflictingRenderers requires __confirm).',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            path: {
+              type: 'string',
+              description: 'GameObject path (e.g. Root/Child)',
+            },
+            componentType: {
+              type: 'string',
+              description: 'Component type name (e.g. SpriteRenderer, MyComponent; use Namespace.TypeName when ambiguous)',
+            },
+            removeConflictingRenderers: {
+              type: 'boolean',
+              description: 'If true, removes MeshFilter/MeshRenderer when adding SpriteRenderer (requires __confirm).',
+            },
+          },
+          required: ['path', 'componentType'],
+          additionalProperties: false,
+        },
+      },
+      {
+        name: 'unity.gameObject.createEmptySafe',
+        description: 'Create an empty GameObject safely (supports optional parentPath and active flag).',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            name: {
+              type: 'string',
+              description: 'New GameObject name.',
+            },
+            parentPath: {
+              type: 'string',
+              description: 'Optional parent GameObject path (e.g. Root/Child).',
+            },
+            active: {
+              type: 'boolean',
+              description: 'Whether the new GameObject starts active (default: true).',
+            },
+          },
+          required: ['name'],
+          additionalProperties: false,
+        },
+      },
+      {
         name: 'unity.assetImport.setTextureType',
         description:
           "Set TextureImporter.textureType via an allowlisted UnityEditor helper (works even if LocalMcp.UnityServer.AssetImport.Editor is not installed).",
@@ -1184,6 +1357,15 @@ export class UnityMCPServer {
         runtimeConfigPath: this.runtimeConfigPath,
         runtimeConfigExists: fs.existsSync(this.runtimeConfigPath),
         lastRuntimeConfigError: this.lastRuntimeConfigError,
+        bridgeConfig: {
+          path: BRIDGE_FILE_CONFIG.path,
+          exists: BRIDGE_FILE_CONFIG.exists,
+          error: BRIDGE_FILE_CONFIG.error,
+          warnings: BRIDGE_FILE_CONFIG.warnings,
+          requireConfirmation: BRIDGE_CONFIG.requireConfirmation,
+          confirmAllowlist: BRIDGE_CONFIG.confirmAllowlist,
+          confirmDenylist: BRIDGE_CONFIG.confirmDenylist,
+        },
         lastUnityHttpUrlWarning: this.lastUnityHttpUrlWarning,
         lastUnityHttpUrlError: this.lastUnityHttpUrlError,
         blockedUnityHttpUrl: this.blockedUnityHttpUrl,
@@ -1388,6 +1570,31 @@ export class UnityMCPServer {
         // Normalize known Unity-side argument aliases.
         let forwardedArgs = normalizeUnityArguments(name, args);
 
+        if (name === 'unity.component.add') {
+          const removeConflictingRenderers = parseBoolean(
+            forwardedArgs?.removeConflictingRenderers ?? forwardedArgs?.remove_conflicting_renderers,
+            false
+          );
+          forwardedArgs.removeConflictingRenderers = removeConflictingRenderers;
+          delete forwardedArgs.remove_conflicting_renderers;
+
+          if (removeConflictingRenderers && !confirm) {
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text:
+                    `removeConflictingRenderers: true will remove MeshFilter/MeshRenderer when adding SpriteRenderer.\n` +
+                    `Re-run the same tool call with an explicit confirmation flag:\n` +
+                    `  - __confirm: true\n` +
+                    `  - (optional) __confirmNote: "why this is safe"`,
+                },
+              ],
+              isError: true,
+            };
+          }
+        }
+
         // Resolve ambiguous targets (preflight) before requiring confirmation, so agents can fetch candidates safely.
         if (isUnambiguousTargetRequiredToolName(name, BRIDGE_CONFIG) && !allowAmbiguous) {
           if (isLikelyGameObjectTargetToolName(name)) {
@@ -1468,6 +1675,14 @@ export class UnityMCPServer {
 
         if (name === 'unity.assetImport.listSprites') {
           return await handleAssetImportListSprites(this.unityHttpUrl, forwardedArgs, timeoutMs);
+        }
+
+        if (name === 'unity.component.add') {
+          return await handleComponentAdd(this.unityHttpUrl, forwardedArgs, timeoutMs);
+        }
+
+        if (name === 'unity.gameObject.createEmptySafe') {
+          return await handleGameObjectCreateEmptySafe(this.unityHttpUrl, forwardedArgs, timeoutMs);
         }
 
         if (name === 'unity.component.setSpriteReference') {

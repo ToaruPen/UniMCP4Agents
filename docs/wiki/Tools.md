@@ -49,12 +49,16 @@ Bridge は一部ツールについてキー別名を自動で補完します（�
 - `unity.assetImport.setTextureType`
   - `LocalMcp.UnityServer.AssetImport.Editor` 未導入でも、TextureImporter の `textureType`（例: `Sprite`）を変更できます（必要なら reimport）。
   - アセット設定変更＋再import を伴うため、`__confirm: true` が必要です。
+- `unity.component.add`
+  - `SpriteRenderer` 追加時に `removeConflictingRenderers: true` を指定すると `MeshFilter` / `MeshRenderer` を自動で外します（`__confirm: true` 必須）。
 - `unity.component.setReference`（Sprite フィールド）
   - `Assets/...png` など Texture のパスを渡したとき、Unity側が main asset（Texture2D）を返して `Sprite` と型不一致になる場合があります。
   - Bridge は **自動フォールバックは行いません**（sprite sheet 等で暗黙に“どれか1つ”を選ぶのを避けるため）。
   - `unity.assetImport.listSprites` で候補（`spriteNames`）を取得し、`unity.component.setSpriteReference` で `spriteName` を明示して設定してください。
+- `unity.gameObject.createEmptySafe`
+  - 空の GameObject を安全に作成します（`parentPath`/`active` は任意）。
 
 ## Tilemap 作成の注意（2D）
 
 `TilemapRenderer` は `MeshFilter` / `MeshRenderer` 等と競合するため、primitive（Cube/Quad 等）に追加すると失敗します。
-Tilemap 用 GameObject は「空の GameObject」から作る（または `unity.editor.executeMenuItem("GameObject/2D Object/Tilemap/Rectangular")` を使う）ことを推奨します。
+Tilemap 用 GameObject は「空の GameObject」（`unity.gameObject.createEmptySafe`）から作る（または `unity.editor.executeMenuItem("GameObject/2D Object/Tilemap/Rectangular")` を使う）ことを推奨します。

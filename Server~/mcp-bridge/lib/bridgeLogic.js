@@ -23,12 +23,53 @@ export function parseBoolean(value, fallback) {
   return fallback;
 }
 
-export function createBridgeConfig(env) {
+function normalizeToolPatterns(list) {
+  if (!Array.isArray(list)) {
+    return [];
+  }
+  return list
+    .filter((entry) => typeof entry === 'string')
+    .map((entry) => entry.trim())
+    .filter((entry) => entry.length > 0);
+}
+
+function escapeRegex(source) {
+  return source.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function matchesToolPattern(pattern, toolName) {
+  if (typeof pattern !== 'string' || pattern.length === 0) {
+    return false;
+  }
+  if (typeof toolName !== 'string' || toolName.length === 0) {
+    return false;
+  }
+
+  if (pattern === '*') {
+    return true;
+  }
+
+  const escaped = escapeRegex(pattern).replace(/\\\*/g, '.*');
+  const regex = new RegExp(`^${escaped}$`, 'i');
+  return regex.test(toolName);
+}
+
+function matchesAnyToolPattern(patterns, toolName) {
+  if (!Array.isArray(patterns) || patterns.length === 0) {
+    return false;
+  }
+  return patterns.some((pattern) => matchesToolPattern(pattern, toolName));
+}
+
+export function createBridgeConfig(env, fileConfig = null) {
   const defaultToolTimeoutMs = parsePositiveInt(env?.MCP_TOOL_TIMEOUT_MS, 60_000);
   const heavyToolTimeoutMs = parsePositiveInt(env?.MCP_HEAVY_TOOL_TIMEOUT_MS, 300_000);
   const maxToolTimeoutMs = parsePositiveInt(env?.MCP_MAX_TOOL_TIMEOUT_MS, 600_000);
 
-  const requireConfirmation = parseBoolean(env?.MCP_REQUIRE_CONFIRMATION, true);
+  const requireConfirmation = parseBoolean(
+    env?.MCP_REQUIRE_CONFIRMATION !== undefined ? env?.MCP_REQUIRE_CONFIRMATION : fileConfig?.requireConfirmation,
+    true
+  );
   const requireUnambiguousTargets = parseBoolean(env?.MCP_REQUIRE_UNAMBIGUOUS_TARGETS, true);
   const enableUnsafeEditorInvoke = parseBoolean(env?.MCP_ENABLE_UNSAFE_EDITOR_INVOKE, false);
   const allowRemoteUnityHttpUrl = parseBoolean(env?.MCP_ALLOW_REMOTE_UNITY_HTTP_URL, false);
@@ -39,6 +80,8 @@ export function createBridgeConfig(env) {
     parsePositiveInt(env?.MCP_PREFLIGHT_SCENE_LIST_TIMEOUT_MS, defaultToolTimeoutMs),
     maxToolTimeoutMs
   );
+  const confirmAllowlist = normalizeToolPatterns(fileConfig?.confirm?.allowlist);
+  const confirmDenylist = normalizeToolPatterns(fileConfig?.confirm?.denylist);
 
   return Object.freeze({
     defaultToolTimeoutMs,
@@ -52,6 +95,8 @@ export function createBridgeConfig(env) {
     sceneListMaxDepth,
     ambiguousCandidateLimit,
     preflightSceneListTimeoutMs,
+    confirmAllowlist,
+    confirmDenylist,
   });
 }
 
@@ -116,13 +161,23 @@ export function isConfirmationRequiredToolName(toolName, config) {
   if (toolName === 'unity.editor.invokeStaticMethod') {
     return true;
   }
-  if (!config?.requireConfirmation) {
-    return false;
-  }
   // Bridge tools are always allowed.
   if (toolName.startsWith('bridge.')) {
     return false;
   }
+
+  if (matchesAnyToolPattern(config?.confirmDenylist, toolName)) {
+    return true;
+  }
+
+  if (matchesAnyToolPattern(config?.confirmAllowlist, toolName)) {
+    return false;
+  }
+
+  if (!config?.requireConfirmation) {
+    return false;
+  }
+
   // Bridge override that changes importer settings (+ optional reimport).
   if (toolName === 'unity.assetImport.setTextureType') {
     return true;

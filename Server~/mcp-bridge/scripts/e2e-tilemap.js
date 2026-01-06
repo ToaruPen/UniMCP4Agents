@@ -149,8 +149,9 @@ async function main() {
     const tools = toolList?.tools ?? [];
 
     const createTool = requireTool(tools, 'unity.create', /create/i);
+    const createEmptySafeTool = tools.find((tool) => tool.name === 'unity.gameObject.createEmptySafe') ?? null;
     const addComponentTool = pickComponentAddTool(tools);
-    const removeComponentTool = requireTool(tools, 'unity.component.remove', /component\\.remove/i);
+    const removeComponentTool = createEmptySafeTool ? null : requireTool(tools, 'unity.component.remove', /component\\.remove/i);
     const sceneListTool = requireTool(tools, 'unity.scene.list', /scene\\.list/i);
     const executeMenuItemTool = requireTool(tools, 'unity.editor.executeMenuItem', /executeMenuItem/i);
     const destroyTool = requireSingleToolByFilter(
@@ -188,27 +189,38 @@ async function main() {
     console.log('[TM-01] Primitive route fails with guidance');
 
     // TM-02: correct route (empty GO + Tilemap + TilemapRenderer)
-    // unity.create does not always support empty objects, so we create a primitive and remove mesh components.
-    const tilemapRootCreateArgs = buildArgsFromSchema(createTool, [
-      { keys: ['primitiveType', 'type'], value: 'Cube' },
-      { keys: ['name', 'gameObjectName', 'objectName'], value: tilemapRootName },
-    ]);
-    const tilemapRootCreate = await client.callTool({ name: createTool.name, arguments: tilemapRootCreateArgs });
-    if (tilemapRootCreate?.isError) {
-      fail(`TM-02 create tilemap root failed:\n${stringifyToolCallResult(tilemapRootCreate)}`);
-    }
-
-    for (const componentType of ['MeshFilter', 'MeshRenderer']) {
-      const removeArgs = buildArgsFromSchema(removeComponentTool, [
-        { keys: ['path', 'gameObjectPath', 'hierarchyPath'], value: tilemapRootName },
-        { keys: ['componentType', 'type', 'name'], value: componentType },
+    if (createEmptySafeTool) {
+      const createEmptyArgs = buildArgsFromSchema(createEmptySafeTool, [
+        { keys: ['name'], value: tilemapRootName },
+        { keys: ['active'], value: true, optional: true },
       ]);
-      const removeResult = await client.callTool({
-        name: removeComponentTool.name,
-        arguments: { ...removeArgs, __confirm: true, __confirmNote: `e2e-tilemap TM-02 remove ${componentType}` },
-      });
-      if (removeResult?.isError) {
-        fail(`TM-02 remove ${componentType} failed:\n${stringifyToolCallResult(removeResult)}`);
+      const tilemapRootCreate = await client.callTool({ name: createEmptySafeTool.name, arguments: createEmptyArgs });
+      if (tilemapRootCreate?.isError) {
+        fail(`TM-02 create empty tilemap root failed:\n${stringifyToolCallResult(tilemapRootCreate)}`);
+      }
+    } else {
+      // unity.create does not always support empty objects, so we create a primitive and remove mesh components.
+      const tilemapRootCreateArgs = buildArgsFromSchema(createTool, [
+        { keys: ['primitiveType', 'type'], value: 'Cube' },
+        { keys: ['name', 'gameObjectName', 'objectName'], value: tilemapRootName },
+      ]);
+      const tilemapRootCreate = await client.callTool({ name: createTool.name, arguments: tilemapRootCreateArgs });
+      if (tilemapRootCreate?.isError) {
+        fail(`TM-02 create tilemap root failed:\n${stringifyToolCallResult(tilemapRootCreate)}`);
+      }
+
+      for (const componentType of ['MeshFilter', 'MeshRenderer']) {
+        const removeArgs = buildArgsFromSchema(removeComponentTool, [
+          { keys: ['path', 'gameObjectPath', 'hierarchyPath'], value: tilemapRootName },
+          { keys: ['componentType', 'type', 'name'], value: componentType },
+        ]);
+        const removeResult = await client.callTool({
+          name: removeComponentTool.name,
+          arguments: { ...removeArgs, __confirm: true, __confirmNote: `e2e-tilemap TM-02 remove ${componentType}` },
+        });
+        if (removeResult?.isError) {
+          fail(`TM-02 remove ${componentType} failed:\n${stringifyToolCallResult(removeResult)}`);
+        }
       }
     }
 
