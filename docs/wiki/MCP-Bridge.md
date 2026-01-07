@@ -10,9 +10,33 @@
 ## 設定の読み込み順
 
 1. `.unity-mcp-runtime.json`（Unity が生成、HTTP ポート情報）
-2. 環境変数（例: `UNITY_HTTP_URL`）
+2. `mcp-bridge.config.json`（Bridge 設定: 確認ゲートの allow/deny など。`MCP_BRIDGE_CONFIG_PATH` があればそのパスを優先）
+3. 環境変数（例: `UNITY_HTTP_URL`）
 
 主要な環境変数は `Server~/mcp-bridge/README.md` を参照してください。
+
+## 確認ゲートの allow/deny（任意）
+
+Unity プロジェクトルートに `mcp-bridge.config.json` を置くと、確認ゲートを allowlist/denylist で制御できます。
+
+例:
+```json
+{
+  "requireConfirmation": true,
+  "confirm": {
+    "allowlist": ["unity.scene.list", "unity.log.*"],
+    "denylist": ["unity.asset.delete", "unity.*.destroy"]
+  }
+}
+```
+
+ルール:
+- 対象は toolName 全体（例: `unity.scene.list`）
+- ワイルドカードは `*` のみ（大小文字は区別しない）
+- 優先度: `denylist` > `unity.editor.invokeStaticMethod` 固定 > `allowlist` > 既存判定
+- `bridge.*` は例外扱いで常に確認不要（allow/deny の対象外）
+- `MCP_REQUIRE_CONFIRMATION=false` の場合でも `denylist` は常に強制
+- JSON の変更は Bridge 再起動が必要
 
 補足:
 

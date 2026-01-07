@@ -60,24 +60,35 @@ test('createBridgeConfig', () => {
   assert.equal(defaults.sceneListMaxDepth, 20);
   assert.equal(defaults.ambiguousCandidateLimit, 25);
   assert.equal(defaults.preflightSceneListTimeoutMs, 60_000);
+  assert.deepEqual(defaults.confirmAllowlist, []);
+  assert.deepEqual(defaults.confirmDenylist, []);
   assert.ok(Object.isFrozen(defaults));
 
   const fromNull = createBridgeConfig(null);
   assert.equal(fromNull.defaultToolTimeoutMs, 60_000);
 
-  const custom = createBridgeConfig({
-    MCP_TOOL_TIMEOUT_MS: '1000',
-    MCP_HEAVY_TOOL_TIMEOUT_MS: '5000',
-    MCP_MAX_TOOL_TIMEOUT_MS: '4000',
-    MCP_REQUIRE_CONFIRMATION: '0',
-    MCP_REQUIRE_UNAMBIGUOUS_TARGETS: 'false',
-    MCP_ENABLE_UNSAFE_EDITOR_INVOKE: '1',
-    MCP_ALLOW_REMOTE_UNITY_HTTP_URL: 'true',
-    MCP_STRICT_LOCAL_UNITY_HTTP_URL: '1',
-    MCP_SCENE_LIST_MAX_DEPTH: '999',
-    MCP_AMBIGUOUS_CANDIDATE_LIMIT: '999',
-    MCP_PREFLIGHT_SCENE_LIST_TIMEOUT_MS: '9999',
-  });
+  const custom = createBridgeConfig(
+    {
+      MCP_TOOL_TIMEOUT_MS: '1000',
+      MCP_HEAVY_TOOL_TIMEOUT_MS: '5000',
+      MCP_MAX_TOOL_TIMEOUT_MS: '4000',
+      MCP_REQUIRE_CONFIRMATION: '0',
+      MCP_REQUIRE_UNAMBIGUOUS_TARGETS: 'false',
+      MCP_ENABLE_UNSAFE_EDITOR_INVOKE: '1',
+      MCP_ALLOW_REMOTE_UNITY_HTTP_URL: 'true',
+      MCP_STRICT_LOCAL_UNITY_HTTP_URL: '1',
+      MCP_SCENE_LIST_MAX_DEPTH: '999',
+      MCP_AMBIGUOUS_CANDIDATE_LIMIT: '999',
+      MCP_PREFLIGHT_SCENE_LIST_TIMEOUT_MS: '9999',
+    },
+    {
+      requireConfirmation: true,
+      confirm: {
+        allowlist: ['unity.scene.list'],
+        denylist: ['unity.asset.delete'],
+      },
+    }
+  );
   assert.equal(custom.defaultToolTimeoutMs, 1000);
   assert.equal(custom.heavyToolTimeoutMs, 5000);
   assert.equal(custom.maxToolTimeoutMs, 4000);
@@ -89,6 +100,11 @@ test('createBridgeConfig', () => {
   assert.equal(custom.sceneListMaxDepth, 100);
   assert.equal(custom.ambiguousCandidateLimit, 200);
   assert.equal(custom.preflightSceneListTimeoutMs, 4000);
+  assert.deepEqual(custom.confirmAllowlist, ['unity.scene.list']);
+  assert.deepEqual(custom.confirmDenylist, ['unity.asset.delete']);
+
+  const fileOnly = createBridgeConfig({}, { requireConfirmation: false });
+  assert.equal(fileOnly.requireConfirmation, false);
 });
 
 test('analyzeUnityHttpUrl', () => {
@@ -141,9 +157,38 @@ test('analyzeUnityHttpUrl', () => {
   assert.equal(remote.isLoopback, false);
   assert.equal(remote.hostname, 'example.com');
 
+  const https = analyzeUnityHttpUrl('https://localhost:5051');
+  assert.equal(https.ok, true);
+  assert.equal(https.isHttp, true);
+  assert.equal(https.hostname, 'localhost');
+
+  const invalidIpv4Part = analyzeUnityHttpUrl('http://a.b.c.d:5051');
+  assert.equal(invalidIpv4Part.ok, true);
+  assert.equal(invalidIpv4Part.isLoopback, false);
+  assert.equal(invalidIpv4Part.hostname, 'a.b.c.d');
+
+  const emptyIpv4Part = analyzeUnityHttpUrl('http://1..a.b:5051');
+  assert.equal(emptyIpv4Part.ok, true);
+  assert.equal(emptyIpv4Part.isLoopback, false);
+  assert.equal(emptyIpv4Part.hostname, '1..a.b');
+
   const invalid = analyzeUnityHttpUrl('not-a-url');
   assert.equal(invalid.ok, false);
   assert.ok(typeof invalid.error === 'string' && invalid.error.length > 0);
+
+  const originalUrl = global.URL;
+  try {
+    global.URL = class BadUrl {
+      constructor() {
+        throw 'bad';
+      }
+    };
+    const nonError = analyzeUnityHttpUrl('http://example.com');
+    assert.equal(nonError.ok, false);
+    assert.equal(nonError.error, 'Invalid URL: bad');
+  } finally {
+    global.URL = originalUrl;
+  }
 });
 
 test('isConfirmationRequiredToolName', () => {
@@ -161,6 +206,28 @@ test('isConfirmationRequiredToolName', () => {
   const disabled = { ...config, requireConfirmation: false };
   assert.equal(isConfirmationRequiredToolName('unity.asset.delete', disabled), false);
   assert.equal(isConfirmationRequiredToolName('unity.editor.invokeStaticMethod', disabled), true);
+
+  const allowlist = { ...config, confirmAllowlist: ['unity.asset.delete'] };
+  assert.equal(isConfirmationRequiredToolName('unity.asset.delete', allowlist), false);
+
+  const denylist = { ...config, confirmDenylist: ['unity.scene.*'] };
+  assert.equal(isConfirmationRequiredToolName('unity.scene.list', denylist), true);
+
+  const starAllow = { ...config, confirmAllowlist: ['*'] };
+  assert.equal(isConfirmationRequiredToolName('unity.asset.delete', starAllow), false);
+
+  const invalidPatterns = { ...config, confirmDenylist: [null, 123, ''] };
+  assert.equal(isConfirmationRequiredToolName('unity.scene.list', invalidPatterns), false);
+
+  const emptyToolName = { ...config, confirmAllowlist: ['unity.scene.*'] };
+  assert.equal(isConfirmationRequiredToolName('', emptyToolName), false);
+
+  const denyOverridesAllow = {
+    ...config,
+    confirmAllowlist: ['unity.asset.delete'],
+    confirmDenylist: ['unity.asset.delete'],
+  };
+  assert.equal(isConfirmationRequiredToolName('unity.asset.delete', denyOverridesAllow), true);
 });
 
 test('getConfirmFlags', () => {
