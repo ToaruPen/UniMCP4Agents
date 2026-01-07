@@ -140,6 +140,18 @@ https://github.com/ToaruPen/UniMCP4CC.git
 - `unity.component.setProperty` は public property のみ対象です（Inspector 上の多くは SerializedField のため `setField`/`setSerializedProperty` が必要になります）
 - 変更直後は `unity.log.history({ level: "Error,Warning" })` で Unity Console を確認する運用を推奨します（プロジェクト側スクリプト由来の例外が混ざりやすいため）
 
+## 未検証領域（実仕様で追加検証推奨）
+
+以下は E2E で**まだ自動検証していない**領域です。プロジェクト要件に含まれる場合は追加検証を推奨します。
+
+- Input System（ActionAsset / PlayerInput / UI 入力）
+- Physics / Physics2D（衝突・Trigger・FixedUpdate）
+- Animation / AnimatorController / SpriteAtlas
+- Audio（AudioSource / AudioMixer）
+- Addressables / BuildSettings / Player ビルド
+- 複数シーンの加算ロード、大規模シーン、長時間連続運用（数時間以上）
+- UI Toolkit の高度機能（イベント、バインディング、ListView/ScrollView、UI Test Framework 連携）
+
 ## API カテゴリ
 
 | カテゴリ | 説明 |

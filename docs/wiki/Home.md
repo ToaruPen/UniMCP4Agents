@@ -11,6 +11,10 @@
 4. `bridge.status` / `bridge.ping` で接続確認
 5. 作業中は `unity.log.history` で Unity Console の Error/Warning を確認（推奨）
 
+## 未検証領域（実仕様で追加検証推奨）
+
+E2E で未検証の領域は README に記載しています。プロジェクト要件に含まれる場合は追加検証を推奨します。
+
 ## 目次
 
 - [Getting Started](Getting-Started.md)
