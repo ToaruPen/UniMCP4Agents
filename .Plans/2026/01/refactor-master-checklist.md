@@ -20,12 +20,12 @@
 - [ ] コミット
 
 ## 2. bridgeLogic 分割（core）
-- [ ] スコープ確認（`bridgeLogic.js`）
-- [ ] `lib/bridgeLogic/*` の構成確定
-- [ ] 関数移動（config/toolName/args/scene/asset/timeout/log）
-- [ ] `bridgeLogic.js` を re-export 化
-- [ ] `cd Server~/mcp-bridge && npm test`
-- [ ] `cd Server~/mcp-bridge && npm run test:coverage`
+- [x] スコープ確認（`bridgeLogic.js`）
+- [x] `lib/bridgeLogic/*` の構成確定
+- [x] 関数移動（config/toolName/args/scene/asset/timeout/log）
+- [x] `bridgeLogic.js` を re-export 化
+- [x] `cd Server~/mcp-bridge && npm test`
+- [x] `cd Server~/mcp-bridge && npm run test:coverage`
 - [ ] コミット
 
 ## 3. Editor 共有ヘルパ抽出（core）
