@@ -51,6 +51,12 @@ export function isConfirmationRequiredToolName(toolName, config) {
   if (toolName === 'unity.assetImport.setTextureType') {
     return true;
   }
+  if (toolName === 'unity.assetImport.setSpritePixelsPerUnit') {
+    return true;
+  }
+  if (toolName === 'unity.tilemap.setTile' || toolName === 'unity.tilemap.clearTile') {
+    return true;
+  }
 
   const action = toolName.split(/[.:/]/).pop() || toolName;
   const readOnlyActionPrefixes = [

@@ -1,6 +1,7 @@
 #if UNITY_EDITOR
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Text;
 using UnityEditor;
 using UnityEngine;
@@ -16,6 +17,7 @@ namespace UniMCP4CC.Editor
       public string message;
       public string assetPath;
       public string textureType;
+      public float pixelsPerUnit;
       public string gameObjectPath;
       public string componentType;
       public string fieldName;
@@ -88,6 +90,87 @@ namespace UniMCP4CC.Editor
           "error",
           exception.Message,
           payload => payload.textureType = textureType
+        );
+      }
+    }
+
+    public static string SetSpritePixelsPerUnitBase64(string assetPath, string pixelsPerUnit, string reimport)
+    {
+      string EncodeResult(string status, string message, Action<ResultPayload> configure = null)
+      {
+        var payload = new ResultPayload
+        {
+          status = status,
+          message = message,
+          assetPath = assetPath,
+        };
+
+        configure?.Invoke(payload);
+
+        return Encode(payload);
+      }
+
+      try
+      {
+        if (string.IsNullOrWhiteSpace(assetPath))
+        {
+          return EncodeResult("error", "assetPath is required");
+        }
+
+        var importer = AssetImporter.GetAtPath(assetPath) as TextureImporter;
+        if (importer == null)
+        {
+          return EncodeResult("error", $"No TextureImporter found at path: {assetPath}");
+        }
+
+        if (importer.textureType != TextureImporterType.Sprite)
+        {
+          return EncodeResult(
+            "error",
+            "TextureImporter.textureType must be Sprite to set pixelsPerUnit",
+            payload =>
+            {
+              payload.textureType = importer.textureType.ToString();
+              payload.pixelsPerUnit = importer.spritePixelsPerUnit;
+            }
+          );
+        }
+
+        if (!TryParsePositiveFloat(pixelsPerUnit, out var parsedPixelsPerUnit))
+        {
+          return EncodeResult(
+            "error",
+            $"Invalid pixelsPerUnit: {pixelsPerUnit}",
+            payload =>
+            {
+              payload.textureType = importer.textureType.ToString();
+              payload.pixelsPerUnit = importer.spritePixelsPerUnit;
+            }
+          );
+        }
+
+        importer.spritePixelsPerUnit = parsedPixelsPerUnit;
+
+        if (ParseBoolean(reimport, fallback: true))
+        {
+          importer.SaveAndReimport();
+        }
+
+        return EncodeResult(
+          "success",
+          "Texture importer updated",
+          payload =>
+          {
+            payload.textureType = importer.textureType.ToString();
+            payload.pixelsPerUnit = importer.spritePixelsPerUnit;
+          }
+        );
+      }
+      catch (Exception exception)
+      {
+        return EncodeResult(
+          "error",
+          exception.Message
         );
       }
     }
@@ -475,6 +558,22 @@ namespace UniMCP4CC.Editor
         default:
           return fallback;
       }
+    }
+
+    private static bool TryParsePositiveFloat(string value, out float parsed)
+    {
+      parsed = 0f;
+      if (string.IsNullOrWhiteSpace(value))
+      {
+        return false;
+      }
+
+      if (!float.TryParse(value.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out parsed))
+      {
+        return false;
+      }
+
+      return parsed > 0f;
     }
 
     private static string Encode(ResultPayload payload)

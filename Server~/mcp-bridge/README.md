@@ -156,7 +156,10 @@ The bridge automatically adds aliases so you can call tools with either key:
 
 - `unity.editor.listMenuItems`: Bridge provides a robust implementation that enumerates `MenuItem` attributes (supports `filter`).
 - `unity.assetImport.setTextureType`: Bridge tool that sets `TextureImporter.textureType` (e.g. `Sprite`) and optionally reimports (requires `__confirm: true`). This is a safe fallback when `unity.import.*` tools are unavailable (they depend on the optional `LocalMcp.UnityServer.AssetImport.Editor` extension).
+- `unity.assetImport.setSpritePixelsPerUnit`: Bridge tool that sets `TextureImporter.spritePixelsPerUnit` for Sprite textures (requires `__confirm: true`).
 - `unity.assetImport.listSprites`: Bridge tool that lists Sprite sub-assets at a texture path (useful for sprite sheets).
+- `unity.tilemap.setTile`: Bridge tool that sets a TileBase at a Tilemap cell (requires `__confirm: true`).
+- `unity.tilemap.clearTile`: Bridge tool that clears a Tilemap cell (requires `__confirm: true`).
 - `unity.component.add`: Bridge tool that validates target/type and returns explicit errors for ambiguous GameObject or component type failures. `removeConflictingRenderers: true` removes MeshFilter/MeshRenderer when adding SpriteRenderer (requires `__confirm: true`).
 - `unity.component.setSpriteReference`: Bridge tool that sets a Sprite reference by `spriteName` (avoid implicit selection when multiple sprites exist).
 - `unity.gameObject.createEmptySafe`: Bridge tool that creates an empty GameObject (optional `parentPath`/`active`).

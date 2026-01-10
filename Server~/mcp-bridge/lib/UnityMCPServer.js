@@ -39,12 +39,15 @@ import {
   getTilemapRendererPitfallHint,
   handleAssetFindByFilter,
   handleAssetImportListSprites,
+  handleAssetImportSetSpritePixelsPerUnit,
   handleAssetImportSetTextureType,
   handleComponentAdd,
   handleComponentSetReference,
   handleComponentSetSpriteReference,
   handleEditorListMenuItems,
   handleGameObjectCreateEmptySafe,
+  handleTilemapClearTile,
+  handleTilemapSetTile,
   handleUnityLogHistory,
 } from './unityToolHandlers.js';
 
@@ -512,6 +515,30 @@ export class UnityMCPServer {
         },
       },
       {
+        name: 'unity.assetImport.setSpritePixelsPerUnit',
+        description:
+          'Set TextureImporter.spritePixelsPerUnit (Sprite textures only; requires __confirm: true).',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            assetPath: {
+              type: 'string',
+              description: 'Texture asset path (e.g. Assets/Foo.png)',
+            },
+            pixelsPerUnit: {
+              type: 'number',
+              description: 'Sprite pixels per unit (must be > 0).',
+            },
+            reimport: {
+              type: 'boolean',
+              description: 'If true (default), SaveAndReimport() is called.',
+            },
+          },
+          required: ['assetPath', 'pixelsPerUnit'],
+          additionalProperties: false,
+        },
+      },
+      {
         name: 'unity.assetImport.listSprites',
         description:
           'List Sprite sub-assets at a texture path (useful for sprite sheets; returns spriteNames candidates).',
@@ -524,6 +551,68 @@ export class UnityMCPServer {
             },
           },
           required: ['assetPath'],
+          additionalProperties: false,
+        },
+      },
+      {
+        name: 'unity.tilemap.setTile',
+        description:
+          '[Optional] Requires package: com.unity.2d.tilemap (Tilemap). Calls fail if not installed.\n\n' +
+          'Set a tile on a Tilemap at grid coordinates (requires __confirm: true).',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            path: {
+              type: 'string',
+              description: 'Tilemap GameObject path (e.g. Root/Tilemap).',
+            },
+            x: {
+              type: 'integer',
+              description: 'Tilemap cell X coordinate.',
+            },
+            y: {
+              type: 'integer',
+              description: 'Tilemap cell Y coordinate.',
+            },
+            z: {
+              type: 'integer',
+              description: 'Tilemap cell Z coordinate (optional, default 0).',
+            },
+            tileAssetPath: {
+              type: 'string',
+              description: 'TileBase asset path (e.g. Assets/Tiles/Grass.asset).',
+            },
+          },
+          required: ['path', 'x', 'y', 'tileAssetPath'],
+          additionalProperties: false,
+        },
+      },
+      {
+        name: 'unity.tilemap.clearTile',
+        description:
+          '[Optional] Requires package: com.unity.2d.tilemap (Tilemap). Calls fail if not installed.\n\n' +
+          'Clear a tile on a Tilemap at grid coordinates (requires __confirm: true).',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            path: {
+              type: 'string',
+              description: 'Tilemap GameObject path (e.g. Root/Tilemap).',
+            },
+            x: {
+              type: 'integer',
+              description: 'Tilemap cell X coordinate.',
+            },
+            y: {
+              type: 'integer',
+              description: 'Tilemap cell Y coordinate.',
+            },
+            z: {
+              type: 'integer',
+              description: 'Tilemap cell Z coordinate (optional, default 0).',
+            },
+          },
+          required: ['path', 'x', 'y'],
           additionalProperties: false,
         },
       },
@@ -911,6 +1000,10 @@ export class UnityMCPServer {
           return await handleAssetImportSetTextureType(this.unityHttpUrl, forwardedArgs, timeoutMs);
         }
 
+        if (name === 'unity.assetImport.setSpritePixelsPerUnit') {
+          return await handleAssetImportSetSpritePixelsPerUnit(this.unityHttpUrl, forwardedArgs, timeoutMs);
+        }
+
         if (name === 'unity.assetImport.listSprites') {
           return await handleAssetImportListSprites(this.unityHttpUrl, forwardedArgs, timeoutMs);
         }
@@ -921,6 +1014,14 @@ export class UnityMCPServer {
 
         if (name === 'unity.gameObject.createEmptySafe') {
           return await handleGameObjectCreateEmptySafe(this.unityHttpUrl, forwardedArgs, timeoutMs);
+        }
+
+        if (name === 'unity.tilemap.setTile') {
+          return await handleTilemapSetTile(this.unityHttpUrl, forwardedArgs, timeoutMs);
+        }
+
+        if (name === 'unity.tilemap.clearTile') {
+          return await handleTilemapClearTile(this.unityHttpUrl, forwardedArgs, timeoutMs);
         }
 
         if (name === 'unity.component.setSpriteReference') {

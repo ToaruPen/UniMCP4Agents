@@ -12,12 +12,16 @@ const MENU_ITEM_LISTER_TYPE = 'UniMCP4CC.Editor.McpMenuItemLister';
 const MENU_ITEM_LISTER_METHOD = 'ListMenuItemsBase64';
 const ASSET_IMPORT_TYPE = 'UniMCP4CC.Editor.McpAssetImport';
 const ASSET_IMPORT_SET_TEXTURE_TYPE_METHOD = 'SetTextureTypeBase64';
+const ASSET_IMPORT_SET_SPRITE_PPU_METHOD = 'SetSpritePixelsPerUnitBase64';
 const ASSET_IMPORT_SET_SPRITE_REFERENCE_METHOD = 'SetSpriteReferenceBase64';
 const ASSET_IMPORT_LIST_SPRITES_METHOD = 'ListSpritesBase64';
 const COMPONENT_TOOLS_TYPE = 'UniMCP4CC.Editor.McpComponentTools';
 const COMPONENT_ADD_METHOD = 'AddComponentBase64V2';
 const GAMEOBJECT_TOOLS_TYPE = 'UniMCP4CC.Editor.McpGameObjectTools';
 const GAMEOBJECT_CREATE_EMPTY_SAFE_METHOD = 'CreateEmptySafeBase64';
+const TILEMAP_TOOLS_TYPE = 'UniMCP4CC.Editor.McpTilemapTools';
+const TILEMAP_SET_TILE_METHOD = 'SetTileBase64';
+const TILEMAP_CLEAR_TILE_METHOD = 'ClearTileBase64';
 
 function buildEmptyAssetResult() {
   return {
@@ -314,6 +318,68 @@ export async function handleAssetImportSetTextureType(unityHttpUrl, args, timeou
   }
 }
 
+export async function handleAssetImportSetSpritePixelsPerUnit(unityHttpUrl, args, timeoutMs) {
+  const assetPath =
+    typeof args?.assetPath === 'string'
+      ? args.assetPath.trim()
+      : typeof args?.path === 'string'
+        ? args.path.trim()
+        : '';
+
+  const pixelsPerUnitRaw = args?.pixelsPerUnit;
+  const pixelsPerUnit =
+    typeof pixelsPerUnitRaw === 'number'
+      ? String(pixelsPerUnitRaw)
+      : typeof pixelsPerUnitRaw === 'string'
+        ? pixelsPerUnitRaw.trim()
+        : '';
+
+  const reimport = args?.reimport ?? true;
+
+  if (assetPath.length === 0 || pixelsPerUnit.length === 0) {
+    return {
+      content: [
+        {
+          type: 'text',
+          text:
+            `unity.assetImport.setSpritePixelsPerUnit requires:\n` +
+            `- assetPath: "Assets/..." (or path)\n` +
+            `- pixelsPerUnit: number\n` +
+            `- (optional) reimport: true/false`,
+        },
+      ],
+      isError: true,
+    };
+  }
+
+  const invokeArgs = {
+    typeName: ASSET_IMPORT_TYPE,
+    methodName: ASSET_IMPORT_SET_SPRITE_PPU_METHOD,
+    parameters: [assetPath, pixelsPerUnit, String(reimport)],
+  };
+
+  const invokeCall = await tryCallUnityTool(unityHttpUrl, 'unity.editor.invokeStaticMethod', invokeArgs, timeoutMs);
+  if (!invokeCall.ok) {
+    const message = invokeCall.error?.message || 'Unknown JSON-RPC error';
+    const code = invokeCall.error?.code;
+    const details = code ? ` (code: ${code})` : '';
+    return { content: [{ type: 'text', text: `Unity JSON-RPC error${details}: ${message}` }], isError: true };
+  }
+
+  try {
+    const parsed = parseInvokeStaticMethodBase64Payload(invokeCall, 'sprite pixels per unit helper');
+    return {
+      content: [{ type: 'text', text: JSON.stringify(parsed.payload, null, 2) }],
+      isError: parsed.isError,
+    };
+  } catch (error) {
+    return {
+      content: [{ type: 'text', text: `Failed to parse sprite pixels per unit result: ${error.message}` }],
+      isError: true,
+    };
+  }
+}
+
 export async function handleAssetImportListSprites(unityHttpUrl, args, timeoutMs) {
   const assetPath =
     typeof args?.assetPath === 'string'
@@ -356,6 +422,164 @@ export async function handleAssetImportListSprites(unityHttpUrl, args, timeoutMs
   } catch (error) {
     return {
       content: [{ type: 'text', text: `Failed to parse listSprites result: ${error.message}` }],
+      isError: true,
+    };
+  }
+}
+
+export async function handleTilemapSetTile(unityHttpUrl, args, timeoutMs) {
+  const tilemapPath =
+    typeof args?.path === 'string'
+      ? args.path.trim()
+      : typeof args?.tilemapPath === 'string'
+        ? args.tilemapPath.trim()
+        : typeof args?.gameObjectPath === 'string'
+          ? args.gameObjectPath.trim()
+          : '';
+
+  const tileAssetPath =
+    typeof args?.tileAssetPath === 'string'
+      ? args.tileAssetPath.trim()
+      : typeof args?.assetPath === 'string'
+        ? args.assetPath.trim()
+        : '';
+
+  const x =
+    typeof args?.x === 'number'
+      ? String(args.x)
+      : typeof args?.x === 'string'
+        ? args.x.trim()
+        : '';
+  const y =
+    typeof args?.y === 'number'
+      ? String(args.y)
+      : typeof args?.y === 'string'
+        ? args.y.trim()
+        : '';
+  const z =
+    typeof args?.z === 'number'
+      ? String(args.z)
+      : typeof args?.z === 'string'
+        ? args.z.trim()
+        : '';
+  const zValue = z.length > 0 ? z : '0';
+
+  if (tilemapPath.length === 0 || tileAssetPath.length === 0 || x.length === 0 || y.length === 0) {
+    return {
+      content: [
+        {
+          type: 'text',
+          text:
+            `unity.tilemap.setTile requires:\n` +
+            `- path: "Root/Tilemap" (or tilemapPath)\n` +
+            `- x: number\n` +
+            `- y: number\n` +
+            `- (optional) z: number\n` +
+            `- tileAssetPath: "Assets/Tiles/Grass.asset"`,
+        },
+      ],
+      isError: true,
+    };
+  }
+
+  const invokeArgs = {
+    typeName: TILEMAP_TOOLS_TYPE,
+    methodName: TILEMAP_SET_TILE_METHOD,
+    parameters: [tilemapPath, x, y, zValue, tileAssetPath],
+  };
+
+  const invokeCall = await tryCallUnityTool(unityHttpUrl, 'unity.editor.invokeStaticMethod', invokeArgs, timeoutMs);
+  if (!invokeCall.ok) {
+    const message = invokeCall.error?.message || 'Unknown JSON-RPC error';
+    const code = invokeCall.error?.code;
+    const details = code ? ` (code: ${code})` : '';
+    return { content: [{ type: 'text', text: `Unity JSON-RPC error${details}: ${message}` }], isError: true };
+  }
+
+  try {
+    const parsed = parseInvokeStaticMethodBase64Payload(invokeCall, 'tilemap set tile helper');
+    return {
+      content: [{ type: 'text', text: JSON.stringify(parsed.payload, null, 2) }],
+      isError: parsed.isError,
+    };
+  } catch (error) {
+    return {
+      content: [{ type: 'text', text: `Failed to parse tilemap setTile result: ${error.message}` }],
+      isError: true,
+    };
+  }
+}
+
+export async function handleTilemapClearTile(unityHttpUrl, args, timeoutMs) {
+  const tilemapPath =
+    typeof args?.path === 'string'
+      ? args.path.trim()
+      : typeof args?.tilemapPath === 'string'
+        ? args.tilemapPath.trim()
+        : typeof args?.gameObjectPath === 'string'
+          ? args.gameObjectPath.trim()
+          : '';
+
+  const x =
+    typeof args?.x === 'number'
+      ? String(args.x)
+      : typeof args?.x === 'string'
+        ? args.x.trim()
+        : '';
+  const y =
+    typeof args?.y === 'number'
+      ? String(args.y)
+      : typeof args?.y === 'string'
+        ? args.y.trim()
+        : '';
+  const z =
+    typeof args?.z === 'number'
+      ? String(args.z)
+      : typeof args?.z === 'string'
+        ? args.z.trim()
+        : '';
+  const zValue = z.length > 0 ? z : '0';
+
+  if (tilemapPath.length === 0 || x.length === 0 || y.length === 0) {
+    return {
+      content: [
+        {
+          type: 'text',
+          text:
+            `unity.tilemap.clearTile requires:\n` +
+            `- path: "Root/Tilemap" (or tilemapPath)\n` +
+            `- x: number\n` +
+            `- y: number\n` +
+            `- (optional) z: number`,
+        },
+      ],
+      isError: true,
+    };
+  }
+
+  const invokeArgs = {
+    typeName: TILEMAP_TOOLS_TYPE,
+    methodName: TILEMAP_CLEAR_TILE_METHOD,
+    parameters: [tilemapPath, x, y, zValue],
+  };
+
+  const invokeCall = await tryCallUnityTool(unityHttpUrl, 'unity.editor.invokeStaticMethod', invokeArgs, timeoutMs);
+  if (!invokeCall.ok) {
+    const message = invokeCall.error?.message || 'Unknown JSON-RPC error';
+    const code = invokeCall.error?.code;
+    const details = code ? ` (code: ${code})` : '';
+    return { content: [{ type: 'text', text: `Unity JSON-RPC error${details}: ${message}` }], isError: true };
+  }
+
+  try {
+    const parsed = parseInvokeStaticMethodBase64Payload(invokeCall, 'tilemap clear tile helper');
+    return {
+      content: [{ type: 'text', text: JSON.stringify(parsed.payload, null, 2) }],
+      isError: parsed.isError,
+    };
+  } catch (error) {
+    return {
+      content: [{ type: 'text', text: `Failed to parse tilemap clearTile result: ${error.message}` }],
       isError: true,
     };
   }

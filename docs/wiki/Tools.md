@@ -49,6 +49,13 @@ Bridge は一部ツールについてキー別名を自動で補完します（�
 - `unity.assetImport.setTextureType`
   - `LocalMcp.UnityServer.AssetImport.Editor` 未導入でも、TextureImporter の `textureType`（例: `Sprite`）を変更できます（必要なら reimport）。
   - アセット設定変更＋再import を伴うため、`__confirm: true` が必要です。
+- `unity.assetImport.setSpritePixelsPerUnit`
+  - `TextureImporter.spritePixelsPerUnit` を設定します（Sprite テクスチャのみ）。
+  - `__confirm: true` が必要です。
+- `unity.tilemap.setTile` / `unity.tilemap.clearTile`
+  - Tilemap のセルにタイルを配置/削除します（Tilemap モジュールが必要）。
+  - `tileAssetPath` に TileBase アセットを指定します（set のみ）。
+  - `__confirm: true` が必要です。
 - `unity.component.add`
   - `SpriteRenderer` 追加時に `removeConflictingRenderers: true` を指定すると `MeshFilter` / `MeshRenderer` を自動で外します（`__confirm: true` 必須）。
 - `unity.component.setReference`（Sprite フィールド）
